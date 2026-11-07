@@ -1,0 +1,332 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1d2330;
+  --muted: #687085;
+  --border: #dfe3ea;
+  --accent: #3b5bdb;
+  --accent-text: #ffffff;
+  --bad: #c92a2a;
+  --warn: #b7791f;
+  --ok: #2b8a3e;
+  --hover: #eef1f6;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c;
+    --panel: #1b1f26;
+    --text: #e3e7ee;
+    --muted: #8b93a7;
+    --border: #2c323d;
+    --accent: #5c7cfa;
+    --hover: #242a33;
+    --bad: #ff6b6b;
+    --warn: #f0b429;
+    --ok: #51cf66;
+    color-scheme: dark;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  font:
+    14px / 1.45 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--hover);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+button.danger {
+  color: var(--bad);
+}
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+}
+input,
+select,
+textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+}
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.muted {
+  color: var(--muted);
+}
+.error {
+  color: var(--bad);
+  margin: 0.4rem 0;
+}
+.pad {
+  padding: 0.5rem 0.75rem;
+}
+.spacer {
+  flex: 1;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  color: var(--muted);
+  padding: 2rem;
+}
+
+.login {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 1rem;
+}
+.card {
+  width: min(360px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  display: grid;
+  gap: 0.8rem;
+}
+.card h1 {
+  font-size: 1.2rem;
+  margin: 0;
+}
+.card label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 240px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  overflow: auto;
+}
+.sidebar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  font-weight: 600;
+}
+.new-agent {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0 0.75rem 0.75rem;
+}
+.agent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.45rem 0.75rem;
+  background: none;
+  text-align: left;
+}
+.agent.active {
+  background: var(--hover);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.workspace-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.workspace-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.badge {
+  font-size: 0.8rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge.ok {
+  color: var(--ok);
+}
+.badge.bad {
+  color: var(--bad);
+}
+.workspace-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.files {
+  width: 280px;
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  background: var(--panel);
+}
+.toolbar {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  flex-wrap: wrap;
+}
+.hidden-toggle {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0 0.6rem 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.hidden-toggle input {
+  width: auto;
+}
+.tree .node {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 0.15rem 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree .node.active {
+  background: var(--hover);
+}
+.tree .icon {
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+}
+.dot {
+  color: var(--warn);
+}
+
+.editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.editor-host {
+  flex: 1;
+  min-height: 0;
+}
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.banner {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--hover);
+  color: var(--warn);
+}
+.diagnostics {
+  border-top: 1px solid var(--border);
+  max-height: 30%;
+  overflow: auto;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+.diagnostics .bad {
+  color: var(--bad);
+}
+.diagnostics .warn {
+  color: var(--warn);
+}
+
+@media (max-width: 800px) {
+  .main,
+  .workspace-body {
+    flex-direction: column;
+  }
+  .sidebar,
+  .files {
+    width: auto;
+    max-height: 30vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .editor {
+    min-height: 60vh;
+  }
+}

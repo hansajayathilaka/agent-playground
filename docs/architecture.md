@@ -1,6 +1,6 @@
 # Agent Playground: architecture
 
-Status: final plan, 2026-11-07. Implementation starts with Phase 1.
+Status: final plan, 2026-11-07. Phase 1 (Foundations) implemented; see "Phase 1 as built" below.
 Living copy with comments: https://claude.ai/artifact/8DNvqYQD6jHoP95k6qPCPv
 Decision log: [decisions.md](decisions.md)
 
@@ -135,7 +135,7 @@ Cancel interrupts the SDK client and kills the run's process group. Turn and bud
 - Protobuf package `platform.v1` is the single source of truth. Buf lints, generates the Python server stubs and the TypeScript/Go/Rust clients, and blocks breaking changes in CI.
 - Python `grpc.aio` server behind Envoy: native gRPC for the CLI, gRPC-Web for the browser, optional JSON/REST transcoding via `google.api.http` annotations.
 - Commands are unary (start run, send chat message, cancel, answer approval, file CRUD, credentials). Output is one server stream: `WatchEvents(target, after_offset)`, resumable after any disconnect. No client or bidirectional streams, so browsers can make every call.
-- Files over 1 MB are streamed in chunks (`ReadFile` / `WriteFile`), staying under gRPC's 4 MB default.
+- `ReadFile` streams in 1 MiB chunks. `WriteFile` is unary (client streams are banned) and capped at 3 MiB per call; larger uploads will get a chunked-upload flow of unary calls. See decision 18.
 - Server reflection + `grpcurl` for debugging, keepalives on long streams, bearer token in metadata from `AuthProvider`.
 - gRPC is only the client-facing API; work always goes through the queue to workers.
 
@@ -143,8 +143,8 @@ Draft service outline:
 
 | Service | Methods |
 | --- | --- |
-| `AgentService` | `ListAgents`, `GetAgent`, `CreateAgent` (from template), `DeleteAgent`, `ValidateAgent` |
-| `FileService` | `GetTree`, `ReadFile` (stream), `WriteFile` (stream, etag), `DeleteFile`, `MoveFile`, `DiffAgent`, `RollbackAgent` |
+| `AgentService` | `ListAgents`, `GetAgent`, `CreateAgent` (from template), `DeleteAgent`, `ValidateAgent`, `ListTemplates` |
+| `FileService` | `GetTree`, `ReadFile` (stream), `WriteFile` (unary, etag), `DeleteFile`, `MoveFile`, `CreateDirectory`, `DiffAgent`, `RollbackAgent` |
 | `RunService` | `StartRun`, `GetRun`, `ListRuns`, `CancelRun`, `AnswerApproval` |
 | `ConversationService` | `CreateConversation`, `SendMessage`, `ListConversations`, `GetConversation`, `SetApprovals` |
 | `EventService` | `WatchEvents` (server stream) |
@@ -246,7 +246,30 @@ agent-playground/
   docs/
 ```
 
-Python tooling: uv, ruff, pyright (strict), pytest. Web tooling decided in Phase 1.
+Python tooling: uv, ruff, pyright (strict), pytest. Web tooling: pnpm, Vite, React, TypeScript (strict), Biome, Vitest; Connect-ES clients over gRPC-Web (decision 16).
+
+## Phase 1 as built
+
+| Area | Where | Notes |
+| --- | --- | --- |
+| Protobuf API | `proto/platform/v1/{auth,agent,file,common}.proto` | Buf STANDARD lint; `buf breaking` against master in CI |
+| Generated code | `platform/proto/src/playground_proto/`, `web/src/gen/` | `scripts/generate.sh`; committed, CI fails on drift |
+| Core | `platform/core/src/playground_core/` | Ports (`AgentStore`, `AgentRepository`, `TemplateCatalog`, `SessionStore`, `AuthProvider`, `Clock`), `resolve_agent_path()`, `agent.json` schema, validators, agent/file/auth services. Ruff bans adapter, gRPC, DB and Redis imports here |
+| Adapters | `platform/adapters/src/playground_adapters/` | Local-filesystem `AgentStore`, folder `TemplateCatalog`, Postgres agent index (+ migrator), Redis sessions, in-memory variants, static admin `AuthProvider` |
+| API | `platform/api/src/playground_api/` | `grpc.aio`, one interceptor for bearer auth + domain-error → status mapping (new RPCs are authenticated by default), health, reflection; `app.py` is the composition root |
+| Templates | `agents/templates/{blank,assistant}` | Copied into new agents with name/description stamped in |
+| Web UI | `web/` | Login, agent list + create, file tree, Monaco editor with `agent.json` schema, etag conflict handling, diagnostics |
+| Deploy | `deploy/`, `.devcontainer/` | Compose: postgres, redis, api, web (nginx), envoy on :8080 (UI and API same origin) |
+| Tests | `platform/tests/` | Escape suite, services, port contract suites (memory + Postgres + Redis), end-to-end API |
+
+Phase 1 behaviour worth knowing:
+
+- Validation never blocks a save; `WriteFile` returns diagnostics and errors make `ValidateAgent.runnable` false.
+- `state/` and `.git/` are hidden from the tree by default and read-only through the API; `agent.json` can't be deleted or moved.
+- Symlinks are refused anywhere in a client path and never listed. The check is done before each file operation, so a race with a process inside the folder is still possible until the Phase 3 sandbox lands.
+- Agent deletion moves the folder to `<AGENTS_ROOT>/.trash/` and frees the slug.
+- On startup the API indexes agent folders it finds on disk (for seeded system agents such as `_builder`) and drops index rows whose folder is gone.
+- `JobQueue`, `EventLog`, `ControlChannel`, `SecretStore`, `Sandbox`, `ModelProvider`, `AgentRunner` and `ToolRegistry` ports arrive with the phases that use them.
 
 ## Phased delivery
 

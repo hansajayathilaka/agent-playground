@@ -12,6 +12,10 @@ Read `docs/architecture.md` and `docs/decisions.md` before changing anything. Th
 - Secrets never go into agent folders, logs or events. The worker builds each run's env from scratch.
 - Don't add bidirectional or client streaming RPCs (browsers can't use them).
 
-## Tooling (planned)
+## Tooling
 
-Python: uv, ruff, pyright strict, pytest. Protobuf: Buf. Local dev: the devcontainer runs the compose stack.
+- Python (uv workspace in `platform/`): `uv run ruff format platform`, `uv run ruff check platform`, `uv run pyright` (strict), `uv run pytest`.
+- Web (`web/`, pnpm): `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
+- Protobuf: Buf from `web/node_modules/.bin/buf`. After changing `proto/` or `playground_core/manifest.py`, run `scripts/generate.sh` and commit the output; CI fails on drift.
+- Generated Python lives in `playground_proto.platform.v1`, never a top-level `platform` package (it would shadow the stdlib).
+- Local dev: the devcontainer runs the compose stack (`deploy/compose.yaml` + `.devcontainer/compose.yaml`).

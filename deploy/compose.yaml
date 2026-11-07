@@ -1,0 +1,63 @@
+# Production-style stack: docker compose -f deploy/compose.yaml up -d --build
+# Then open http://localhost:8080 and sign in as ADMIN_USERNAME / ADMIN_PASSWORD.
+name: agent-playground
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: playground
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-playground}
+      POSTGRES_DB: playground
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U playground -d playground"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql://playground:${POSTGRES_PASSWORD:-playground}@postgres:5432/playground
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}  # required; the API refuses to start without it
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - agentdata:/data
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+
+  envoy:
+    image: envoyproxy/envoy:v1.34.1
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+
+volumes:
+  pgdata:
+  redisdata:
+  agentdata:

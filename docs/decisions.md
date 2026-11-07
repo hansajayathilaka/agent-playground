@@ -1,6 +1,6 @@
 # Decision log
 
-All decisions made by Hansa on 2026-11-07 during planning. Details: [architecture.md](architecture.md).
+Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20 were implementation choices made in Phase 1 and are open for review. Details: [architecture.md](architecture.md).
 
 | # | Topic | Decision | Notes |
 | --- | --- | --- | --- |
@@ -18,4 +18,9 @@ All decisions made by Hansa on 2026-11-07 during planning. Details: [architectur
 | 12 | Agent-to-agent | Not in v1; room reserved (`AgentRunner` port, `call_agent` slot) | |
 | 13 | Approvals | Risky-tool approval wait can be switched on/off per agent and per conversation | |
 | 14 | Network | Open internet by default; optional per-agent allowlist | |
-| 15 | Repository | `D:\Work\my\agent-playground`, local git for now | GitHub repo to be added later |
+| 15 | Repository | GitHub `hansajayathilaka/agent-playground`, default branch `master` | Development happens in cloud environments; changes land via PRs |
+| 16 | Web tooling | pnpm, Vite, React 19, TypeScript strict, Biome, Vitest; Connect-ES clients with the gRPC-Web transport; Monaco bundled locally | Made during Phase 1 implementation (2026-11-07) |
+| 17 | Python proto package | Generated code lives in `playground_proto.platform.v1` (imports rewritten by `scripts/generate.sh`) | A top-level `platform` package would shadow the stdlib `platform` module. The protobuf package stays `platform.v1` |
+| 18 | `WriteFile` shape | Unary with etag (`if_match`) and `create_only`, 3 MiB cap | The plan said "stream", but client streaming is banned for browser support. Larger files get a chunked-upload flow later |
+| 19 | Login sessions | Opaque random bearer tokens; the `SessionStore` keeps only a SHA-256 of each token (Redis with TTL in v1); admin password from `ADMIN_PASSWORD` | Keeps `AuthProvider` swappable for OIDC later |
+| 20 | Envoy routing | One listener on :8080: `/platform.v1.*` and `/grpc.*` go to the API, everything else to the web UI | Same origin, so no CORS; native gRPC clients use the same port |
