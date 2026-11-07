@@ -15,3 +15,5 @@ build/
 Thumbs.db
 .idea/
 data/
+.pyright/
+web/.vite/
