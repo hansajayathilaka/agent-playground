@@ -17,3 +17,6 @@ Thumbs.db
 data/
 .pyright/
 web/.vite/
+
+# Redis snapshots from local test servers
+*.rdb
