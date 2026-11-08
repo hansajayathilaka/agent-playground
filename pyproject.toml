@@ -8,13 +8,14 @@ description = "Workspace root (not a package)."
 package = false
 
 [tool.uv.workspace]
-members = ["platform/core", "platform/adapters", "platform/proto", "platform/api"]
+members = ["platform/core", "platform/adapters", "platform/proto", "platform/api", "platform/worker"]
 
 [tool.uv.sources]
 playground-core = { workspace = true }
 playground-adapters = { workspace = true }
 playground-proto = { workspace = true }
 playground-api = { workspace = true }
+playground-worker = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -22,6 +23,7 @@ dev = [
   "playground-adapters",
   "playground-proto",
   "playground-api",
+  "playground-worker",
   "grpcio-tools>=1.70",
   "types-grpcio>=1.0",
   "mypy-protobuf>=3.6",
@@ -39,15 +41,24 @@ extend-exclude = ["platform/proto/src/playground_proto/platform"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PTH", "TID"]
-ignore = ["S101"]
+# ASYNC109: claim(timeout=...) is a blocking-read budget passed to the backend.
+ignore = ["S101", "ASYNC109"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["playground_core", "playground_adapters", "playground_proto", "playground_api"]
+known-first-party = [
+  "playground_core",
+  "playground_adapters",
+  "playground_proto",
+  "playground_api",
+  "playground_worker",
+]
 
 [tool.ruff.lint.per-file-ignores]
-"platform/tests/**" = ["S105", "S106", "S108", "TID252"]
+"platform/tests/**" = ["S105", "S106", "S108", "TID252", "ASYNC110"]
 # Column lists are module constants, never user input.
 "platform/adapters/src/playground_adapters/postgres.py" = ["S608"]
+# String paths on purpose: realpath/commonpath semantics for the guard.
+"platform/worker/src/playground_worker/guard.py" = ["PTH"]
 
 [tool.pyright]
 include = ["platform"]

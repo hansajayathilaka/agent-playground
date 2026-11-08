@@ -31,3 +31,8 @@ class PermissionDeniedError(DomainError):
 
 class UnauthenticatedError(DomainError):
     pass
+
+
+class FailedPreconditionError(DomainError):
+    """The system is not in a state that allows the operation (for example an
+    agent with validation errors, or no credential set configured)."""

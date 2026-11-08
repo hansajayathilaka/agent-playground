@@ -12,6 +12,7 @@ import {
   type TreeNode,
   targetDir,
 } from "../lib/tree.js";
+import { ChatPanel } from "./ChatPanel.js";
 import { FileTree } from "./FileTree.js";
 
 interface OpenFile {
@@ -22,8 +23,13 @@ interface OpenFile {
   size: number;
 }
 
+export type WorkspaceView = "files" | "chat";
+
 interface Props {
   slug: string;
+  view: WorkspaceView;
+  conversationId: string | null;
+  onNavigate: (view: WorkspaceView, conversationId: string | null) => void;
   onDeleted: () => void;
   onManifestSaved: () => void;
 }
@@ -45,7 +51,14 @@ async function readAll(slug: string, path: string): Promise<{ etag: string; byte
   return { etag, bytes };
 }
 
-export function AgentWorkspace({ slug, onDeleted, onManifestSaved }: Props) {
+export function AgentWorkspace({
+  slug,
+  view,
+  conversationId,
+  onNavigate,
+  onDeleted,
+  onManifestSaved,
+}: Props) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [showHidden, setShowHidden] = useState(false);
@@ -214,6 +227,26 @@ export function AgentWorkspace({ slug, onDeleted, onManifestSaved }: Props) {
           <h2>{agent?.name ?? slug}</h2>
           <span className="muted">{agent?.description}</span>
         </div>
+        <div className="tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "chat"}
+            className={view === "chat" ? "tab active" : "tab"}
+            onClick={() => onNavigate("chat", conversationId)}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "files"}
+            className={view === "files" ? "tab active" : "tab"}
+            onClick={() => onNavigate("files", null)}
+          >
+            Files
+          </button>
+        </div>
         <span className="spacer" />
         <span className={errors ? "badge bad" : "badge ok"}>
           {errors ? `${errors} error(s): runs blocked` : "valid"}
@@ -222,106 +255,114 @@ export function AgentWorkspace({ slug, onDeleted, onManifestSaved }: Props) {
           Delete agent
         </button>
       </div>
-      <div className="workspace-body">
-        <aside className="files">
-          <div className="toolbar">
-            <button type="button" onClick={newFile} title="New file">
-              + File
-            </button>
-            <button type="button" onClick={newFolder} title="New folder">
-              + Folder
-            </button>
-            <button type="button" onClick={rename} disabled={!selected}>
-              Move
-            </button>
-            <button type="button" onClick={remove} disabled={!selected}>
-              Delete
-            </button>
-          </div>
-          <label className="hidden-toggle">
-            <input
-              type="checkbox"
-              checked={showHidden}
-              onChange={(e) => setShowHidden(e.target.checked)}
+      {view === "chat" ? (
+        <ChatPanel
+          slug={slug}
+          conversationId={conversationId}
+          onSelect={(id) => onNavigate("chat", id)}
+        />
+      ) : (
+        <div className="workspace-body">
+          <aside className="files">
+            <div className="toolbar">
+              <button type="button" onClick={newFile} title="New file">
+                + File
+              </button>
+              <button type="button" onClick={newFolder} title="New folder">
+                + Folder
+              </button>
+              <button type="button" onClick={rename} disabled={!selected}>
+                Move
+              </button>
+              <button type="button" onClick={remove} disabled={!selected}>
+                Delete
+              </button>
+            </div>
+            <label className="hidden-toggle">
+              <input
+                type="checkbox"
+                checked={showHidden}
+                onChange={(e) => setShowHidden(e.target.checked)}
+              />
+              Show platform files (state/, .git/)
+            </label>
+            <FileTree
+              nodes={tree}
+              selected={selected?.path ?? null}
+              dirty={dirty ? (file?.path ?? null) : null}
+              onSelect={(n) => {
+                setSelected(n);
+                if (!n.isDir) void open(n.path);
+              }}
             />
-            Show platform files (state/, .git/)
-          </label>
-          <FileTree
-            nodes={tree}
-            selected={selected?.path ?? null}
-            dirty={dirty ? (file?.path ?? null) : null}
-            onSelect={(n) => {
-              setSelected(n);
-              if (!n.isDir) void open(n.path);
-            }}
-          />
-        </aside>
-        <div className="editor">
-          {file ? (
-            <>
-              <div className="editor-head">
-                <code>{file.path}</code>
-                {dirty && <span className="muted"> (unsaved)</span>}
-                <span className="spacer" />
-                <span className="muted">{status}</span>
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => save()}
-                  disabled={!dirty || file.binary}
-                >
-                  Save
-                </button>
-              </div>
-              {conflict && (
-                <div className="banner">
-                  This file changed on disk since you opened it.
-                  <button type="button" onClick={() => open(file.path)}>
-                    Reload
-                  </button>
-                  <button type="button" className="danger" onClick={() => save(true)}>
-                    Overwrite
+          </aside>
+          <div className="editor">
+            {file ? (
+              <>
+                <div className="editor-head">
+                  <code>{file.path}</code>
+                  {dirty && <span className="muted"> (unsaved)</span>}
+                  <span className="spacer" />
+                  <span className="muted">{status}</span>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => save()}
+                    disabled={!dirty || file.binary}
+                  >
+                    Save
                   </button>
                 </div>
-              )}
-              {file.binary ? (
-                <div className="empty">Binary file ({file.size} bytes) can't be edited here.</div>
-              ) : (
-                <div className="editor-host">
-                  <Editor
-                    height="100%"
-                    path={`/${slug}/${file.path}`}
-                    language={languageFor(file.path)}
-                    value={text}
-                    onChange={(v) => setText(v ?? "")}
-                    theme="vs-dark"
-                    options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: "on" }}
-                  />
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="empty">Select a file to edit.</div>
-          )}
-          {error && <p className="error pad">{error}</p>}
-          {diagnostics.length > 0 && (
-            <ul className="diagnostics">
-              {diagnostics.map((d) => (
-                <li
-                  key={`${d.path}${d.location}${d.message}`}
-                  className={d.severity === Diagnostic_Severity.ERROR ? "bad" : "warn"}
-                >
-                  <button type="button" className="link" onClick={() => open(d.path)}>
-                    {d.path}
-                    {d.location}
-                  </button>{" "}
-                  {d.message}
-                </li>
-              ))}
-            </ul>
-          )}
+                {conflict && (
+                  <div className="banner">
+                    This file changed on disk since you opened it.
+                    <button type="button" onClick={() => open(file.path)}>
+                      Reload
+                    </button>
+                    <button type="button" className="danger" onClick={() => save(true)}>
+                      Overwrite
+                    </button>
+                  </div>
+                )}
+                {file.binary ? (
+                  <div className="empty">Binary file ({file.size} bytes) can't be edited here.</div>
+                ) : (
+                  <div className="editor-host">
+                    <Editor
+                      height="100%"
+                      path={`/${slug}/${file.path}`}
+                      language={languageFor(file.path)}
+                      value={text}
+                      onChange={(v) => setText(v ?? "")}
+                      theme="vs-dark"
+                      options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: "on" }}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="empty">Select a file to edit.</div>
+            )}
+            {error && <p className="error pad">{error}</p>}
+            {diagnostics.length > 0 && (
+              <ul className="diagnostics">
+                {diagnostics.map((d) => (
+                  <li
+                    key={`${d.path}${d.location}${d.message}`}
+                    className={d.severity === Diagnostic_Severity.ERROR ? "bad" : "warn"}
+                  >
+                    <button type="button" className="link" onClick={() => open(d.path)}>
+                      {d.path}
+                      {d.location}
+                    </button>{" "}
+                    {d.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }

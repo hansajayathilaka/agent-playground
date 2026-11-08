@@ -54,7 +54,7 @@ export function NewAgentForm({ onCreated }: { onCreated: (slug: string) => void 
           setSlugTouched(true);
           setSlug(e.target.value);
         }}
-        pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+        pattern="[a-z0-9]([a-z0-9\-]*[a-z0-9])?"
         required
       />
       <textarea

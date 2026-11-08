@@ -1,23 +1,20 @@
 import { useEffect, useState } from "react";
 import { AgentList } from "./components/AgentList.js";
-import { AgentWorkspace } from "./components/AgentWorkspace.js";
+import { AgentWorkspace, type WorkspaceView } from "./components/AgentWorkspace.js";
+import { Credentials } from "./components/Credentials.js";
 import { Login } from "./components/Login.js";
 import { authClient, getToken, onAuthChange, setToken } from "./lib/api.js";
-
-function readSlugFromHash(): string | null {
-  const m = /^#\/agents\/([^/]+)/.exec(window.location.hash);
-  return m?.[1] ? decodeURIComponent(m[1]) : null;
-}
+import { parseRoute, type Route, routeHash } from "./lib/route.js";
 
 export function App() {
   const [signedIn, setSignedIn] = useState(Boolean(getToken()));
-  const [slug, setSlug] = useState<string | null>(readSlugFromHash);
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
   const [listVersion, setListVersion] = useState(0);
   const [user, setUser] = useState("");
 
   useEffect(() => onAuthChange(setSignedIn), []);
   useEffect(() => {
-    const onHash = () => setSlug(readSlugFromHash());
+    const onHash = () => setRoute(parseRoute(window.location.hash));
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -31,10 +28,13 @@ export function App() {
 
   if (!signedIn) return <Login />;
 
-  const select = (next: string | null) => {
-    window.location.hash = next ? `#/agents/${encodeURIComponent(next)}` : "";
-    setSlug(next);
+  const go = (next: Route) => {
+    window.location.hash = routeHash(next);
+    setRoute(next);
   };
+  const slug = route.page === "agent" ? route.slug : null;
+  const select = (next: string | null) =>
+    go(next ? { page: "agent", slug: next, view: "chat", conversationId: null } : { page: "home" });
 
   const logout = async () => {
     try {
@@ -49,6 +49,13 @@ export function App() {
       <header className="topbar">
         <strong>Agent Playground</strong>
         <span className="spacer" />
+        <button
+          type="button"
+          className={route.page === "credentials" ? "tab active" : "tab"}
+          onClick={() => go({ page: "credentials" })}
+        >
+          Credentials
+        </button>
         {user && <span className="muted">{user}</span>}
         <button type="button" onClick={logout}>
           Sign out
@@ -61,10 +68,17 @@ export function App() {
           version={listVersion}
           onChanged={() => setListVersion((v) => v + 1)}
         />
-        {slug ? (
+        {route.page === "credentials" ? (
+          <Credentials />
+        ) : route.page === "agent" ? (
           <AgentWorkspace
-            key={slug}
-            slug={slug}
+            key={route.slug}
+            slug={route.slug}
+            view={route.view}
+            conversationId={route.conversationId}
+            onNavigate={(view: WorkspaceView, conversationId: string | null) =>
+              go({ page: "agent", slug: route.slug, view, conversationId })
+            }
             onDeleted={() => {
               select(null);
               setListVersion((v) => v + 1);

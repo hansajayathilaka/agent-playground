@@ -110,6 +110,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -f deploy/api.Dockerfile -t agent-playground-api .
+      - run: docker build -f deploy/worker.Dockerfile -t agent-playground-worker .
+      - name: Worker image can find the bundled Claude CLI
+        run: docker run --rm agent-playground-worker python -c "from playground_worker.launcher import bundled_cli; print(bundled_cli())"
       - run: docker build -f deploy/web.Dockerfile -t agent-playground-web .
       - name: Validate Envoy config
         run: |
