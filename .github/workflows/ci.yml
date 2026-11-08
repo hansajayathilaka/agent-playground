@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: playground
+          POSTGRES_PASSWORD: playground
+          POSTGRES_DB: playground_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U playground" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://playground:playground@localhost:5432/playground_test
+      TEST_REDIS_URL: redis://localhost:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run ruff format --check platform
+      - run: uv run ruff check platform
+      - run: uv run pyright
+      - run: uv run pytest -ra
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: uv sync --frozen
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - name: buf lint
+        run: ../web/node_modules/.bin/buf lint
+        working-directory: proto
+      - name: buf format
+        run: ../web/node_modules/.bin/buf format --diff --exit-code
+        working-directory: proto
+      - name: buf breaking (against master)
+        working-directory: proto
+        run: |
+          if git cat-file -e origin/master:proto/buf.yaml 2>/dev/null; then
+            ../web/node_modules/.bin/buf breaking --against "../.git#ref=refs/remotes/origin/master,subdir=proto"
+          else
+            echo "No proto/ on master yet; nothing to compare against."
+          fi
+      - name: Generated code is up to date
+        run: |
+          scripts/generate.sh
+          git add -N .
+          git diff --exit-code
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/api.Dockerfile -t agent-playground-api .
+      - run: docker build -f deploy/web.Dockerfile -t agent-playground-web .
+      - name: Validate Envoy config
+        run: |
+          for f in deploy/envoy/envoy.yaml deploy/envoy/envoy.dev.yaml; do
+            docker run --rm -v "$PWD/$f:/cfg.yaml:ro" envoyproxy/envoy:v1.34.1 \
+              envoy --mode validate -c /cfg.yaml
+          done

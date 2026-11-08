@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package platform.v1;
+
+import "google/protobuf/timestamp.proto";
+import "platform/v1/common.proto";
+
+// File CRUD inside one agent folder. Every path is relative to the agent root
+// and is resolved server-side by resolve_agent_path(); absolute paths, ".."
+// segments and symlinks are rejected with INVALID_ARGUMENT.
+service FileService {
+  rpc GetTree(GetTreeRequest) returns (GetTreeResponse);
+  // Streams the file in chunks of at most 1 MiB.
+  rpc ReadFile(ReadFileRequest) returns (stream ReadFileResponse);
+  // Unary on purpose: browsers can't do client streaming. Files over the
+  // single-message limit will get a chunked upload flow later.
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  rpc MoveFile(MoveFileRequest) returns (MoveFileResponse);
+  rpc CreateDirectory(CreateDirectoryRequest) returns (CreateDirectoryResponse);
+}
+
+message FileEntry {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_FILE = 1;
+    KIND_DIRECTORY = 2;
+  }
+  // Relative to the agent root, using "/" separators.
+  string path = 1;
+  Kind kind = 2;
+  int64 size = 3;
+  google.protobuf.Timestamp modified_at = 4;
+}
+
+message GetTreeRequest {
+  string slug = 1;
+  // Include platform-owned paths (state/, .git/). Hidden by default.
+  bool include_hidden = 2;
+}
+
+message GetTreeResponse {
+  // Depth-first, directories before files, sorted by name.
+  repeated FileEntry entries = 1;
+}
+
+message ReadFileRequest {
+  string slug = 1;
+  string path = 2;
+}
+
+message ReadFileResponse {
+  // Set on the first message only.
+  FileEntry entry = 1;
+  // Set on the first message only. Pass back as if_match to WriteFile.
+  string etag = 2;
+  bytes chunk = 3;
+}
+
+message WriteFileRequest {
+  string slug = 1;
+  string path = 2;
+  bytes content = 3;
+  // Optimistic concurrency: when set, the write fails with ABORTED unless the
+  // file's current etag matches.
+  string if_match = 4;
+  // Fail with ALREADY_EXISTS if the file exists.
+  bool create_only = 5;
+}
+
+message WriteFileResponse {
+  FileEntry entry = 1;
+  string etag = 2;
+  // Validation results for schema-checked files (agent.json,
+  // .claude/settings.json, .mcp.json). The write succeeds regardless.
+  repeated Diagnostic diagnostics = 3;
+}
+
+message DeleteFileRequest {
+  string slug = 1;
+  string path = 2;
+  // Required to delete a non-empty directory.
+  bool recursive = 3;
+}
+
+message DeleteFileResponse {}
+
+message MoveFileRequest {
+  string slug = 1;
+  string from_path = 2;
+  string to_path = 3;
+}
+
+message MoveFileResponse {
+  FileEntry entry = 1;
+}
+
+message CreateDirectoryRequest {
+  string slug = 1;
+  string path = 2;
+}
+
+message CreateDirectoryResponse {
+  FileEntry entry = 1;
+}

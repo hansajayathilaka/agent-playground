@@ -1,0 +1,64 @@
+[project]
+name = "agent-playground"
+version = "0.1.0"
+requires-python = ">=3.12"
+description = "Workspace root (not a package)."
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["platform/core", "platform/adapters", "platform/proto", "platform/api"]
+
+[tool.uv.sources]
+playground-core = { workspace = true }
+playground-adapters = { workspace = true }
+playground-proto = { workspace = true }
+playground-api = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "playground-core",
+  "playground-adapters",
+  "playground-proto",
+  "playground-api",
+  "grpcio-tools>=1.70",
+  "types-grpcio>=1.0",
+  "mypy-protobuf>=3.6",
+  "types-protobuf>=5.29",
+  "pyright>=1.1.400",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "ruff>=0.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["platform/proto/src/playground_proto/platform"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PTH", "TID"]
+ignore = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["playground_core", "playground_adapters", "playground_proto", "playground_api"]
+
+[tool.ruff.lint.per-file-ignores]
+"platform/tests/**" = ["S105", "S106", "S108", "TID252"]
+# Column lists are module constants, never user input.
+"platform/adapters/src/playground_adapters/postgres.py" = ["S608"]
+
+[tool.pyright]
+include = ["platform"]
+exclude = ["platform/proto/src/playground_proto/platform", "**/.venv", "**/__pycache__"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["platform/tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

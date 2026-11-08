@@ -1,0 +1,36 @@
+# Devcontainer overlay on deploy/compose.yaml: adds the "dev" workspace
+# container and points Envoy at the API and Vite running inside it.
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+      - devdata:/data
+    environment:
+      DATABASE_URL: postgresql://playground:playground@postgres:5432/playground
+      REDIS_URL: redis://redis:6379/0
+      AGENTS_ROOT: /data/agents
+      TEMPLATES_ROOT: /workspace/agents/templates
+      ADMIN_PASSWORD: dev
+      ENVOY_URL: http://envoy:8080
+      TEST_DATABASE_URL: postgresql://playground:playground@postgres:5432/playground_test
+      TEST_REDIS_URL: redis://redis:6379/15
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: playground
+    volumes:
+      - ./init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
+
+  envoy:
+    volumes:
+      - ../deploy/envoy/envoy.dev.yaml:/etc/envoy/envoy.yaml:ro
+
+volumes:
+  devdata:
