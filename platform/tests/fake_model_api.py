@@ -1,7 +1,8 @@
 """A tiny stand-in for the Anthropic Messages API, enough for the real Claude
 CLI to complete a turn. Every reply is "pong: <last user text>". Trigger
-words in the user text first ask for one tool call (see TOOL_TRIGGERS), and
-"slow" streams the reply very slowly so a cancel lands mid-stream."""
+words in the user text first ask for one tool call (see TOOL_TRIGGERS),
+"run-bash: <command>" asks for one Bash call running <command>, and "slow"
+streams the reply very slowly so a cancel lands mid-stream."""
 
 from __future__ import annotations
 
@@ -36,6 +37,15 @@ TOOL_TRIGGERS: dict[str, tuple[str, dict[str, Any]]] = {
     "use-escape": ("Write", {"file_path": "../escaped.txt", "content": "x"}),
     "use-bash": ("Bash", {"command": "env > workspace/env.txt", "description": "dump env"}),
 }
+BASH_PREFIX = "run-bash: "
+
+
+def _tool_request(text: str) -> tuple[str, dict[str, Any]] | None:
+    if text.startswith(BASH_PREFIX):
+        command = text[len(BASH_PREFIX) :]
+        return "Bash", {"command": command, "description": "test command", "timeout": 60000}
+    trigger = next((t for t in TOOL_TRIGGERS if t in text), None)
+    return TOOL_TRIGGERS[trigger] if trigger else None
 
 
 class FakeModelAPI:
@@ -98,10 +108,10 @@ class FakeModelAPI:
     def respond(self, h: BaseHTTPRequestHandler, body: dict[str, Any]) -> None:
         text = _last_user_text(body)
         n = len(self.requests)
-        trigger = next((t for t in TOOL_TRIGGERS if t in text), None)
+        tool = _tool_request(text)
         blocks: list[dict[str, Any]]
-        if trigger and body.get("tools"):
-            name, tool_input = TOOL_TRIGGERS[trigger]
+        if tool and body.get("tools"):
+            name, tool_input = tool
             blocks = [{"type": "tool_use", "id": f"toolu_{n}", "name": name, "input": tool_input}]
             stop = "tool_use"
         else:

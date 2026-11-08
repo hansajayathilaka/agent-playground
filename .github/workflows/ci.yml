@@ -37,11 +37,19 @@ jobs:
         with:
           version: "0.11.32"
           python-version: "3.12"
+      - name: Install bubblewrap for the sandbox escape suite
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - run: uv sync --frozen
       - run: uv run ruff format --check platform
       - run: uv run ruff check platform
       - run: uv run pyright
       - run: uv run pytest -ra
+        env:
+          # Fail instead of skipping if the jail can't start in CI.
+          REQUIRE_SANDBOX: "1"
 
   web:
     runs-on: ubuntu-latest
@@ -113,6 +121,11 @@ jobs:
       - run: docker build -f deploy/worker.Dockerfile -t agent-playground-worker .
       - name: Worker image can find the bundled Claude CLI
         run: docker run --rm agent-playground-worker python -c "from playground_worker.launcher import bundled_cli; print(bundled_cli())"
+      - name: Worker image can start a jail with cgroup limits (privileged, as in compose)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          docker run --rm --privileged --cgroupns=private agent-playground-worker \
+            playground-worker-selfcheck --require-cgroups
       - run: docker build -f deploy/web.Dockerfile -t agent-playground-web .
       - name: Validate Envoy config
         run: |

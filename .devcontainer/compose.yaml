@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile
     command: sleep infinity
+    # The sandbox escape suite runs real bubblewrap jails (decision 7).
+    privileged: true
     volumes:
       - ..:/workspace:cached
       - devdata:/data

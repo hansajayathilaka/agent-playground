@@ -2,7 +2,7 @@
 
 A platform for creating and running many Claude Agent SDK agents. Each agent lives in its own folder (CLAUDE.md, rules, memory, settings, MCP config, hooks, skills, subagents), runs in a background worker sandboxed to that folder, and streams its output to any client. A Builder agent creates and edits the other agents.
 
-Status: Phases 1-2 implemented: create and edit agent folders, add model credentials, and chat with agents in the browser (background runs, live streaming, multi-turn sessions, cancel). OS-level isolation (Phase 3) and the Builder (Phase 4) come next; until Phase 3, treat agents as trusted code.
+Status: Phases 1-3 implemented: create and edit agent folders, add model credentials, and chat with agents in the browser (background runs, live streaming, multi-turn sessions, cancel). Every run is jailed with bubblewrap to its own folder, with filtered network egress and per-run resource limits. The Builder (Phase 4) comes next. The worker container runs privileged; on Ubuntu 24.04+ hosts set `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (see docs/architecture.md, "Phase 3 as built").
 
 ## Quick start
 

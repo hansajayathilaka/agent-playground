@@ -46,16 +46,28 @@ services:
       redis: { condition: service_healthy }
 
   # Runs agents. Scale with `docker compose up --scale worker=N`.
+  # Privileged so the bubblewrap jail can create namespaces and mount /proc,
+  # and so the entrypoint can delegate cgroup v2 limits (decision 7). The
+  # worker process itself drops to an unprivileged user with no capabilities.
+  # Hosts that restrict unprivileged user namespaces (Ubuntu 24.04+) need
+  # `sysctl kernel.apparmor_restrict_unprivileged_userns=0`.
   worker:
     build:
       context: ..
       dockerfile: deploy/worker.Dockerfile
+    privileged: true
+    cgroup: private
     environment:
       DATABASE_URL: postgresql://playground:${POSTGRES_PASSWORD:-playground}@postgres:5432/playground
       REDIS_URL: redis://redis:6379/0
       SECRETS_KEY: ${SECRETS_KEY:-}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Per-run defaults; agent.json limits.* override them.
+      RUN_TIMEOUT_SECONDS: ${RUN_TIMEOUT_SECONDS:-3600}
+      RUN_MEMORY_MB: ${RUN_MEMORY_MB:-4096}
+      RUN_CPUS: ${RUN_CPUS:-2}
+      RUN_MAX_PROCESSES: ${RUN_MAX_PROCESSES:-512}
     volumes:
       - agentdata:/data
     stop_grace_period: 45s

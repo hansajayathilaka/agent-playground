@@ -1,6 +1,6 @@
 # Agent Playground: architecture
 
-Status: final plan, 2026-11-07. Phases 1 (Foundations) and 2 (Runs) implemented; see "Phase 1 as built" and "Phase 2 as built" below.
+Status: final plan, 2026-11-07. Phases 1 (Foundations), 2 (Runs) and 3 (Isolation) implemented; see the "as built" sections below.
 Living copy with comments: https://claude.ai/artifact/8DNvqYQD6jHoP95k6qPCPv
 Decision log: [decisions.md](decisions.md)
 
@@ -60,7 +60,7 @@ Every external dependency sits behind a port (interface) in the core package. Sw
 | Repositories | Runs, conversations, credential sets, agent index | Postgres | SQLite for tests, MySQL |
 | `AgentStore` | File CRUD inside one agent root, path guard | Local filesystem volume | S3/GCS-backed store, NFS |
 | `SecretStore` | Encrypt/decrypt credentials and tool secrets | Postgres + AES-GCM, master key from env | Vault, AWS/GCP KMS |
-| `Sandbox` | Wrap a run's processes | SDK bubblewrap sandbox | Container per run, Firecracker |
+| `Sandbox` | Wrap a run's processes | Outer bubblewrap jail around the CLI, in the Claude runner (decision 28) | Container per run, Firecracker |
 | `ModelProvider` | Turn a credential set into SDK env / gateway config | Anthropic, Anthropic-compatible, LiteLLM | Any new provider |
 | `AuthProvider` | Identify the caller | Single admin login | OIDC, multi-user |
 | `AgentRunner` | Execute one agent turn | Claude Agent SDK | Other agent runtimes, a fake for tests |
@@ -123,12 +123,12 @@ Cancel interrupts the SDK client and kills the run's process group. Turn and bud
 | --- | --- | --- |
 | 1. SDK permissions | File tools reaching outside the folder | `PreToolUse` hook realpaths every path; rejects `..`, outside absolute paths, escaping symlinks; denies writes to `state/`, `tools/`, `hooks/` |
 | 2. Platform API | File CRUD escaping a folder | One `resolve_agent_path()` used by every call: realpath, prefix check, no-follow; no call takes a raw path |
-| 3. OS sandbox | Bash, custom code, stdio MCP touching anything else | SDK bubblewrap sandbox: writes limited to the agent folder, reads outside denied, children inherit it. CPU, memory and timeouts from the worker |
+| 3. OS sandbox | Bash, hooks, custom code, stdio MCP touching anything else | Outer bubblewrap jail around the whole CLI: the agent folder read-only except `memory/` and `workspace/`, nothing else of the data volume, own PID/network namespaces, egress only through the worker's proxy. cgroup v2 memory/CPU/process limits and a wall-clock timeout per run |
 
 - Secrets never live in agent folders; they are injected per run as env vars.
 - bubblewrap inside Docker needs user namespaces, so the **worker container only** runs with the extra privileges (custom seccomp/AppArmor profile or `SYS_ADMIN`). API, UI and Envoy stay unprivileged.
 - An escape test suite (path traversal, symlinks, `cat ../`, reading other agents) runs in CI and in the devcontainer.
-- Network is open by default; an agent can opt into a domain allowlist in `agent.json`.
+- Network is open by default (HTTP(S) to public addresses through the egress proxy); an agent can opt into a domain allowlist in `agent.json`. See "Phase 3 as built".
 
 ## Client API (gRPC)
 
@@ -221,7 +221,7 @@ Providers: Claude via Anthropic API, Bedrock or Vertex, and Anthropic-compatible
 
 ## Deployment and local development
 
-- v1: Docker Compose on a Linux server. Services: `envoy`, `api`, `worker` (privileged for bubblewrap), `web`, `postgres`, `redis`, optional `litellm`. Agent folders and SDK sessions on a named data volume.
+- v1: Docker Compose on a Linux server. Services: `envoy`, `api`, `worker` (privileged for bubblewrap and cgroups; the worker process itself is unprivileged), `web`, `postgres`, `redis`, optional `litellm`. Agent folders and SDK sessions on a named data volume.
 - Local: a devcontainer running the same compose stack (works on Windows via Docker Desktop / WSL2).
 - Later: cloud, with the same images; adapters swap through the ports.
 - Auth v1: a single admin login behind `AuthProvider`.
@@ -296,10 +296,43 @@ Isolation in Phase 2 (honest status; Phase 3 closes the rest):
 
 - **Env**: the SDK starts the CLI with the worker's whole environment plus `options.env`. `cli_path` points at `playground-claude-launcher`, which drops every variable the worker itself had (names passed in `PLAYGROUND_DROP_ENV`) unless the run set it. A run's env is built from scratch: `PATH`, `HOME`/`CLAUDE_CONFIG_DIR`/`TMPDIR` under `/data/sessions/<slug>`, non-secret proxy/CA passthrough, and the provider env. Tested with the real CLI: a Bash `env` dump inside a run contains no worker variables.
 - **File tools**: the platform `PreToolUse` hook realpaths every Read/Glob/Grep/LS/Write/Edit/MultiEdit/NotebookEdit path; anything outside the agent folder, or inside `state/`/`.git/`, is denied, and writes are limited to `memory/` and `workspace/`. Agent hooks run too; a deny from any hook wins.
-- **Not yet contained**: Bash commands, the agent's own hook scripts and stdio MCP servers are ordinary processes of the worker user. The SDK's bubblewrap sandbox only wraps Bash (see the plan review), so Phase 3 should wrap the whole CLI in an outer bwrap jail; the launcher is already the single exec point where that goes. Until then, treat agents as trusted code.
-- The CLI's process group is not killed on cancel yet (the SDK terminates the CLI; children started by Bash may outlive it). Phase 3's jail with `--die-with-parent` covers this.
+- **Not yet contained** (closed in Phase 3): Bash commands, the agent's own hook scripts and stdio MCP servers were ordinary processes of the worker user, and children started by Bash could outlive a cancel.
 
 Known gaps carried forward: events live only in Redis (AOF on), not archived to Postgres; Bedrock/Vertex credential sets are rejected until Phase 5; `TestCredentialSet` is not implemented; deleting an agent leaves its conversations in the database.
+
+## Phase 3 as built
+
+| Area | Where | Notes |
+| --- | --- | --- |
+| Jail | `playground_worker/jail.py`, `launcher.py` | `JailSpec` (built by the runner, passed in `PLAYGROUND_JAIL`, scrubbed before exec) → bwrap argv. The launcher joins the run's cgroup, sets rlimits and execs `bwrap … -- claude` |
+| Egress | `playground_worker/egress.py`, `jail_init.py` | Per-run HTTP/CONNECT proxy on a unix socket in `RUN_RUNTIME_DIR`; `jail_init` (stdlib-only, first process in the jail) relays `127.0.0.1:3128` to it. Blocked requests get a 403 and a `notice` event |
+| Limits | `playground_worker/cgroups.py`, `deploy/worker-entrypoint.sh` | `run-<id>` cgroups under the delegated `RUN_CGROUP_ROOT` (`memory.max`, `memory.swap.max`, `pids.max`, `cpu.max`); `cgroup.kill` on exit; OOM kills become a `notice` |
+| Manifest | `playground_core/manifest.py` | `limits.timeout_seconds`, `memory_mb`, `cpus`, `max_processes`; `network.allowlist` is now enforced. They reach the runner as `RunRequest.limits` / `network_allowlist` |
+| Guard | `playground_worker/guard.py` | Unchanged for normal agents; the Builder may also read other agents' folders |
+| Ops | `playground-worker-selfcheck` | Checks bwrap and (with `--require-cgroups`) that a jailed process lands in a limited cgroup. CI runs it in the worker image |
+| Tests | `platform/tests/test_sandbox.py`, `test_sandbox_units.py` | Escape suite with the real CLI: reading other agents and worker files, writing outside `memory/`/`workspace/`, `state/` visibility, worker `/proc` and env, direct network, proxy to private addresses, agent hook scripts, Builder view, background processes after the run, timeout, symlinked `workspace/` |
+
+What a jailed run sees:
+
+| Path | Access |
+| --- | --- |
+| `/usr`, `/bin`, `/lib*`, selected `/etc` files (TLS, users, resolver, linker) | read-only |
+| The bundled CLI's directory; the worker's Python stdlib (for `jail_init`); CA files named by passthrough env | read-only |
+| `agents/<slug>/` | read-only; `memory/` and `workspace/` writable; `state/` and `.git/` replaced by empty read-only tmpfs |
+| `/data/sessions/<slug>/` (HOME, `CLAUDE_CONFIG_DIR`, TMPDIR) | writable |
+| `/tmp`, `/run`, `/dev`, `/proc` | fresh per run; `/proc` shows only the run's processes |
+| Everything else (`/data/agents/*`, `/opt/venv`, `/home`, worker files) | absent |
+| Builder (`_builder`) | additionally every agent folder read-only, without `state/`, `.git/` and `.trash/` |
+
+Namespaces: user (where needed), PID, IPC, UTS, cgroup and network; capabilities dropped; `--new-session` (no terminal injection); `--die-with-parent`, so killing the CLI or the worker ends the whole tree, and the PID namespace takes background processes with it.
+
+Network: the jail has only loopback. `HTTP(S)_PROXY` point at `jail_init`'s relay and `NO_PROXY` is empty, so the CLI, WebFetch, git, pip, npm and curl work through the proxy. The proxy always lets the model endpoint through (the credential set's `ANTHROPIC_BASE_URL`, else `api.anthropic.com`). With `network.allowlist` only matching hosts (`example.com`, `*.example.com`) are reachable; without one any public address is, and loopback, RFC 1918, CGNAT, link-local and other reserved addresses are refused (the resolved address is checked and then connected to, so DNS rebinding can't swap it). Behind an upstream proxy (`HTTPS_PROXY` in the worker env, `NO_PROXY` honoured) names the worker can't resolve are passed on, and that proxy becomes the egress control. Raw TCP, SSH and UDP don't work from a jail.
+
+Limits: per run, `agent.json` `limits.*` or the worker's `RUN_TIMEOUT_SECONDS` (3600), `RUN_MEMORY_MB` (4096), `RUN_CPUS` (2), `RUN_MAX_PROCESSES` (512). The timeout fails the run with "time limit". cgroup limits need cgroup v2 and the entrypoint's delegation (privileged container, `cgroup: private`); elsewhere only the timeout and rlimits apply, and the worker logs why at start.
+
+Settings: `SANDBOX_MODE` (`bwrap` | `none`, development only), `SANDBOX_NETWORK` (`proxy` | `host`; `host` shares the worker's network and can reach Redis/Postgres), `RUN_CGROUP_ROOT` (set by the entrypoint), `RUN_RUNTIME_DIR`, `BUILDER_SLUG`.
+
+Still open after Phase 3: the agent can read its own `tools/`, `.claude/` and `.mcp.json` (by design) and anything world-readable under `/usr`; the worker container itself is privileged, so a kernel escape from a jail is a container escape (a VM or gVisor runtime is the next step if agents become untrusted multi-tenant code); per-run disk usage is bounded only by the file-size rlimit, not a quota.
 
 ## Phased delivery
 

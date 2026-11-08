@@ -11,13 +11,14 @@ import asyncio
 import shutil
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
 from playground_core.events import EventKind
 from playground_core.models import RunStatus
 from playground_core.ports import RunRequest
+from playground_worker.jail import SandboxSettings, SandboxUnavailableError, check_sandbox
 from playground_worker.launcher import bundled_cli
 from playground_worker.sdk_runner import ClaudeAgentRunner
 
@@ -27,6 +28,18 @@ try:
     bundled_cli()
 except SystemExit:  # pragma: no cover - depends on the installed wheel
     pytest.skip("bundled Claude CLI not available", allow_module_level=True)
+
+
+# Jailed where bwrap works (CI, devcontainer, worker image), plain otherwise.
+def _sandbox_mode() -> Literal["bwrap", "none"]:
+    try:
+        check_sandbox(SandboxSettings())
+    except SandboxUnavailableError:  # pragma: no cover - environment
+        return "none"
+    return "bwrap"
+
+
+SANDBOX_MODE = _sandbox_mode()
 
 
 class Sink:
@@ -56,7 +69,8 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ClaudeAgentRunner
     (agent / "template.json").unlink(missing_ok=True)
     # A worker secret that must never reach the agent's processes.
     monkeypatch.setenv("PLAYGROUND_TEST_WORKER_SECRET", "do-not-leak")
-    return ClaudeAgentRunner(root, tmp_path / "sessions", ["NO_PROXY", "no_proxy"])
+    sandbox = SandboxSettings(mode=SANDBOX_MODE, runtime_dir=tmp_path / "runtime")
+    return ClaudeAgentRunner(root, tmp_path / "sessions", ["NO_PROXY", "no_proxy"], sandbox)
 
 
 def request(api: FakeModelAPI, prompt: str, resume: str = "", run_id: str = "r1") -> RunRequest:

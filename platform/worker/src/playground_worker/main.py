@@ -14,6 +14,7 @@ from playground_core.services.agents import AgentService
 from playground_core.services.credentials import CredentialService
 from playground_core.services.execution import LeaseTiming, RunExecutor
 from playground_worker.config import WorkerSettings
+from playground_worker.jail import check_sandbox
 from playground_worker.worker import Worker
 
 log = logging.getLogger("playground_worker")
@@ -54,10 +55,14 @@ def build_worker(infra: Infra, settings: WorkerSettings, runner: AgentRunner) ->
 async def serve(settings: WorkerSettings) -> None:
     from playground_worker.sdk_runner import ClaudeAgentRunner
 
+    sandbox = settings.sandbox()
+    check_sandbox(sandbox)
+    if sandbox.mode == "none":
+        log.warning("SANDBOX_MODE=none: agents run unconfined (development only)")
     async with AsyncExitStack() as stack:
         infra = await build_infra(settings, stack)
         runner = ClaudeAgentRunner(
-            settings.agents_root, settings.sessions_root, settings.run_env_passthrough
+            settings.agents_root, settings.sessions_root, settings.run_env_passthrough, sandbox
         )
         worker = build_worker(infra, settings, runner)
         loop = asyncio.get_running_loop()

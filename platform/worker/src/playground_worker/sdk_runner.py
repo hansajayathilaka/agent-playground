@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,20 @@ from playground_core.events import EventKind
 from playground_core.models import RunStatus, RunUsage
 from playground_core.paths import resolve_agent_path
 from playground_core.ports import EventSink, RunOutcome, RunRequest
+from playground_worker.cgroups import CgroupLimits, RunCgroups
+from playground_worker.egress import EgressPolicy, EgressProxy, Upstream, endpoint_of
 from playground_worker.guard import make_pre_tool_use_hook
+from playground_worker.jail import (
+    JAIL_VAR,
+    PROXY_PORT,
+    WRITABLE_DIRS,
+    JailError,
+    JailSpec,
+    SandboxSettings,
+    bwrap_args,
+    jail_init_file,
+    python_for_jail,
+)
 from playground_worker.launcher import DROP_VAR, REAL_CLI_VAR, bundled_cli
 
 log = logging.getLogger(__name__)
@@ -262,18 +276,29 @@ def launcher_path() -> str:
     return found or "playground-claude-launcher"
 
 
+DEFAULT_ANTHROPIC_ENDPOINT = ("api.anthropic.com", 443)
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
+CA_VARS = ("SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
+
+
 class ClaudeAgentRunner:
     def __init__(
         self,
         agents_root: Path,
         sessions_root: Path,
         passthrough: list[str],
+        sandbox: SandboxSettings | None = None,
     ) -> None:
         self._agents_root = agents_root
         self._sessions_root = sessions_root
         self._passthrough = passthrough
         self._real_cli = bundled_cli()
         self._launcher = launcher_path()
+        self._sandbox = sandbox or SandboxSettings()
+        self._cgroups = RunCgroups(self._sandbox.cgroup_root)
+        if self._sandbox.mode == "bwrap" and not self._cgroups.available:
+            log.warning("per-run memory/CPU/process limits are off: %s", self._cgroups.reason)
 
     def run_env(self, request: RunRequest) -> dict[str, str]:
         """The run's whole environment, built from scratch."""
@@ -301,14 +326,83 @@ class ClaudeAgentRunner:
         env[REAL_CLI_VAR] = self._real_cli
         return env
 
-    def options(self, request: RunRequest) -> ClaudeAgentOptions:
+    def _is_builder(self, request: RunRequest) -> bool:
+        return bool(self._sandbox.builder_slug) and request.agent_slug == self._sandbox.builder_slug
+
+    def agent_dir(self, request: RunRequest) -> Path:
         agent_dir, _ = resolve_agent_path(self._agents_root, request.agent_slug, allow_root=True)
+        for name in WRITABLE_DIRS:
+            d = agent_dir / name
+            if d.is_symlink():
+                raise JailError(f"{name}/ must be a real directory inside the agent folder")
+            d.mkdir(exist_ok=True)
+        return agent_dir
+
+    def jail_spec(
+        self, request: RunRequest, agent_dir: Path, egress_socket: Path | None, cgroup: Path | None
+    ) -> JailSpec:
+        s = self._sandbox
+        python, prefixes = python_for_jail()
+        ro_files = tuple(
+            sorted(
+                {
+                    os.path.realpath(os.environ[v])
+                    for v in CA_VARS
+                    if v in self._passthrough and os.environ.get(v)
+                }
+            )
+        )
+        agents_root = ""
+        readable: tuple[str, ...] = ()
+        if self._is_builder(request):
+            root = self._agents_root.resolve()
+            agents_root = str(root)
+            readable = tuple(
+                str(p) for p in sorted(root.iterdir()) if p.is_dir() and not p.is_symlink()
+            )
+        spec = JailSpec(
+            agent_dir=str(agent_dir),
+            session_dir=str((self._sessions_root / request.agent_slug).resolve()),
+            cli_dir=str(Path(self._real_cli).resolve().parent),
+            network=s.network,
+            egress_socket=str(egress_socket) if egress_socket else "",
+            python=python,
+            python_prefixes=prefixes,
+            jail_init=jail_init_file(),
+            ro_files=ro_files,
+            agents_root=agents_root,
+            readable_agents=readable,
+            cgroup=str(cgroup) if cgroup else "",
+            rlimits={
+                "core": 0,
+                "fsize": s.max_file_mb * 1024 * 1024,
+                "nofile": s.max_open_files,
+            },
+        )
+        bwrap_args(spec, ["true"])  # validates the spec before the SDK starts
+        return spec
+
+    def options(
+        self, request: RunRequest, agent_dir: Path | None = None, jail: JailSpec | None = None
+    ) -> ClaudeAgentOptions:
+        if agent_dir is None:
+            agent_dir = self.agent_dir(request)
+        env = self.run_env(request)
+        if jail is not None:
+            env[JAIL_VAR] = jail.to_json()
+            if jail.network == "proxy":
+                proxy = f"http://127.0.0.1:{PROXY_PORT}"
+                for name in PROXY_VARS:
+                    env[name] = proxy
+                for name in NO_PROXY_VARS:
+                    env[name] = ""
+        builder_root = self._agents_root if self._is_builder(request) else None
         return ClaudeAgentOptions(
             cwd=str(agent_dir),
             cli_path=self._launcher,
             setting_sources=["project"],
             system_prompt={"type": "preset", "preset": "claude_code"},
-            env=self.run_env(request),
+            env=env,
             model=request.model,
             max_turns=request.max_turns,
             max_budget_usd=request.max_budget_usd,
@@ -316,13 +410,84 @@ class ClaudeAgentRunner:
             include_partial_messages=True,
             permission_mode="default",
             can_use_tool=_allow_all,
-            hooks={"PreToolUse": [HookMatcher(hooks=[make_pre_tool_use_hook(agent_dir)])]},
+            hooks={
+                "PreToolUse": [HookMatcher(hooks=[make_pre_tool_use_hook(agent_dir, builder_root)])]
+            },
             stderr=lambda line: log.debug("claude[%s]: %s", request.run_id, line[:500]),
         )
 
+    def _limits(self, request: RunRequest) -> CgroupLimits:
+        s, lim = self._sandbox, request.limits
+        return CgroupLimits(
+            memory_mb=lim.memory_mb or s.memory_mb,
+            cpus=lim.cpus or s.cpus,
+            max_processes=lim.max_processes or s.max_processes,
+        )
+
+    def _egress_policy(self, request: RunRequest) -> EgressPolicy:
+        base = request.env.get("ANTHROPIC_BASE_URL", "")
+        endpoint = endpoint_of(base) if base else DEFAULT_ANTHROPIC_ENDPOINT
+        endpoints = frozenset({endpoint} if endpoint else set[tuple[str, int]]())
+        return EgressPolicy(endpoints=endpoints, allowlist=tuple(request.network_allowlist))
+
+    @contextlib.asynccontextmanager
+    async def _sandboxed(
+        self, request: RunRequest, emit: EventSink
+    ) -> AsyncGenerator[ClaudeAgentOptions]:
+        agent_dir = self.agent_dir(request)
+        if self._sandbox.mode == "none":
+            yield self.options(request, agent_dir)
+            return
+        cgroup = self._cgroups.create(request.run_id, self._limits(request))
+        try:
+            if self._sandbox.network == "host":
+                yield self.options(
+                    request, agent_dir, self.jail_spec(request, agent_dir, None, cgroup)
+                )
+                return
+            runtime = self._sandbox.runtime_dir
+            runtime.mkdir(parents=True, exist_ok=True)
+            runtime.chmod(0o711)
+            sock = runtime / f"egress-{os.getpid()}-{request.run_id[:40]}.sock"
+            sock.unlink(missing_ok=True)
+
+            async def on_deny(host: str, port: int, reason: str) -> None:
+                await emit(
+                    EventKind.NOTICE,
+                    {"level": "warning", "message": f"network: blocked {host}:{port} ({reason})"},
+                )
+
+            proxy = EgressProxy(sock, self._egress_policy(request), Upstream(os.environ), on_deny)
+            async with proxy:
+                yield self.options(
+                    request, agent_dir, self.jail_spec(request, agent_dir, sock, cgroup)
+                )
+        finally:
+            oom = RunCgroups.oom_killed(cgroup)
+            await asyncio.to_thread(self._cgroups.destroy, cgroup)
+            if oom:
+                await emit(
+                    EventKind.NOTICE,
+                    {"level": "error", "message": "the run hit its memory limit"},
+                )
+
     async def run(self, request: RunRequest, emit: EventSink, cancel: asyncio.Event) -> RunOutcome:
+        try:
+            async with self._sandboxed(request, emit) as options:
+                return await self._run(request, options, emit, cancel)
+        except JailError as exc:
+            await emit(EventKind.NOTICE, {"level": "error", "message": str(exc)})
+            return RunOutcome(request.resume_session_id, RunStatus.FAILED, str(exc))
+
+    async def _run(
+        self,
+        request: RunRequest,
+        options: ClaudeAgentOptions,
+        emit: EventSink,
+        cancel: asyncio.Event,
+    ) -> RunOutcome:
         tr = Translator(session_id=request.resume_session_id)
-        options = self.options(request)
+        timeout = request.limits.timeout_seconds or self._sandbox.timeout_seconds
 
         async def pump(client: ClaudeSDKClient) -> None:
             async for msg in client.receive_response():
@@ -330,6 +495,7 @@ class ClaudeAgentRunner:
                     await emit(kind, data, parent_tool_use_id=parent)
 
         cancelled = False
+        timed_out = False
         try:
             async with ClaudeSDKClient(options) as client:
                 await client.query(request.prompt)
@@ -337,10 +503,11 @@ class ClaudeAgentRunner:
                 stopper = asyncio.create_task(cancel.wait())
                 try:
                     done, _ = await asyncio.wait(
-                        {reader, stopper}, return_when=asyncio.FIRST_COMPLETED
+                        {reader, stopper}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
                     )
-                    if stopper in done and reader not in done:
-                        cancelled = True
+                    if reader not in done:
+                        cancelled = stopper in done
+                        timed_out = not cancelled
                         with contextlib.suppress(Exception):
                             await asyncio.wait_for(client.interrupt(), 10)
                         with contextlib.suppress(TimeoutError):
@@ -361,6 +528,10 @@ class ClaudeAgentRunner:
             return RunOutcome(tr.session_id, RunStatus.FAILED, _safe_error(exc), tr.usage())
 
         result = tr.result
+        if timed_out:
+            reason = f"the run hit its time limit of {timeout} s"
+            await emit(EventKind.NOTICE, {"level": "error", "message": reason})
+            return RunOutcome(tr.session_id, RunStatus.FAILED, reason, tr.usage())
         if cancelled:
             return RunOutcome(tr.session_id, RunStatus.CANCELLED, "cancelled", tr.usage())
         if result is None:

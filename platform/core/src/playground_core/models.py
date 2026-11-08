@@ -111,6 +111,16 @@ class Conversation:
 
 
 @dataclass(frozen=True, slots=True)
+class RunLimits:
+    """Sandbox limits for one run; None means the worker's default."""
+
+    timeout_seconds: int | None = None
+    memory_mb: int | None = None
+    cpus: float | None = None
+    max_processes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RunUsage:
     input_tokens: int = 0
     output_tokens: int = 0
