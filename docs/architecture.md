@@ -1,6 +1,6 @@
 # Agent Playground: architecture
 
-Status: final plan, 2026-11-07. Phase 1 (Foundations) implemented; see "Phase 1 as built" below.
+Status: final plan, 2026-11-07. Phases 1 (Foundations) and 2 (Runs) implemented; see "Phase 1 as built" and "Phase 2 as built" below.
 Living copy with comments: https://claude.ai/artifact/8DNvqYQD6jHoP95k6qPCPv
 Decision log: [decisions.md](decisions.md)
 
@@ -270,6 +270,36 @@ Phase 1 behaviour worth knowing:
 - Agent deletion moves the folder to `<AGENTS_ROOT>/.trash/` and frees the slug.
 - On startup the API indexes agent folders it finds on disk (for seeded system agents such as `_builder`) and drops index rows whose folder is gone.
 - `JobQueue`, `EventLog`, `ControlChannel`, `SecretStore`, `Sandbox`, `ModelProvider`, `AgentRunner` and `ToolRegistry` ports arrive with the phases that use them.
+
+## Phase 2 as built
+
+| Area | Where | Notes |
+| --- | --- | --- |
+| Protobuf API | `proto/platform/v1/{run,event,credential}.proto` | `RunService`, `ConversationService`, `EventService.WatchEvents`, `CredentialService`. `AnswerApproval`/`SetApprovals` come with approvals (Phase 5) |
+| Core | `playground_core/{events,providers}.py`, `services/{conversations,credentials,execution}.py` | Event envelope v1, provider env mapping, API-side conversation service, worker-side `RunExecutor` (pure orchestration over ports) |
+| Ports | `playground_core/ports.py` | `JobQueue`, `EventLog`, `ControlChannel`, `RunRepository`, `ConversationRepository`, `CredentialRepository`, `SecretStore`, `AgentRunner`; each has a contract suite in `platform/tests/contracts` |
+| Adapters | `playground_adapters/{redis_runs,postgres,secrets,memory,wiring}.py` | Redis Streams queue + Lua lease lock, Redis Streams event log, Redis pub/sub control, Postgres repos (migration `0002_runs.sql`), AES-256-GCM secrets. `wiring.py` is the single composition root used by the API and the worker |
+| Worker | `platform/worker/src/playground_worker/` | `playground-worker`: N claim slots, heartbeat, reaper, graceful shutdown; `ClaudeAgentRunner` on `ClaudeSDKClient`; `playground-claude-launcher` (env scrubbing); file-tool guard hook |
+| Web UI | `web/src/components/{ChatPanel,Credentials}.tsx`, `web/src/lib/{transcript,route}.ts` | Chat tab per agent (conversation list, live streaming transcript, nested subagent tool calls, stop button, queue position), credentials page. Hash routes keep agent/tab/conversation across refresh |
+| Deploy | `deploy/worker.Dockerfile`, `deploy/compose.yaml` | `worker` service (unprivileged until Phase 3), shared `agentdata` volume (`/data/agents`, `/data/sessions`), `SECRETS_KEY` required by API and worker |
+
+How a turn flows:
+
+1. `SendMessage` (or `StartRun`, a one-turn conversation) validates the agent and resolves a credential set, writes a `queued` run, appends `user_message` + `run_status` events and enqueues a `Job(run_id, agent_slug)`.
+2. **Queue** (Redis): each agent has a FIFO list; a `wake` stream (consumer group `workers`) carries "look at agent X" hints. A worker that reads a wake tries the agent lock (`SET NX PX`, token compared in Lua on renew/release) and, holding it, takes the agent's in-flight job or pops the next one. The holder releases the lock *before* re-waking the agent if more jobs wait, so no wake is lost. A lock that expires with a job in flight (dead worker) gives that job back exactly once as `recovered`, and the executor marks it `interrupted` instead of re-running it (decision 4: no automatic retries). Every worker's reaper also re-wakes orphaned agents and interrupts `running` runs with a stale DB heartbeat.
+3. **Executor**: subscribes to the control channel, compare-and-sets `queued → running`, resolves credentials (run override → conversation override → `agent.json` `credential_set` name → default), decrypts the secret, builds the provider env and model, then calls the `AgentRunner`. Heartbeats renew the lease and the DB row; a lost lease cancels the run as `interrupted`.
+4. **Runner**: `ClaudeSDKClient` with `cwd` = agent folder, `setting_sources=["project"]`, `claude_code` system prompt preset, partial messages on, `resume=<session_id>` for later turns, `max_turns`/`max_budget_usd` from `agent.json`, `can_use_tool` allowing everything (the approvals switch plugs in here), and the platform `PreToolUse` guard. SDK messages become platform events (`Translator`); session id is saved on the conversation.
+5. **Events**: one Redis stream per conversation with our own offsets (entry id `0-<offset>`). `WatchEvents(conversation_id, after_offset)` replays then follows, with heartbeats (offset 0) every 15 s while idle. The UI folds events into a transcript, replaying from 0 on load and resuming from the last offset after a disconnect.
+6. **Cancel**: a queued run is cancelled in the DB directly (CAS); a running one gets a control message, the runner interrupts the SDK client and returns `cancelled`. The SDK session is kept, so the next turn resumes it.
+
+Isolation in Phase 2 (honest status; Phase 3 closes the rest):
+
+- **Env**: the SDK starts the CLI with the worker's whole environment plus `options.env`. `cli_path` points at `playground-claude-launcher`, which drops every variable the worker itself had (names passed in `PLAYGROUND_DROP_ENV`) unless the run set it. A run's env is built from scratch: `PATH`, `HOME`/`CLAUDE_CONFIG_DIR`/`TMPDIR` under `/data/sessions/<slug>`, non-secret proxy/CA passthrough, and the provider env. Tested with the real CLI: a Bash `env` dump inside a run contains no worker variables.
+- **File tools**: the platform `PreToolUse` hook realpaths every Read/Glob/Grep/LS/Write/Edit/MultiEdit/NotebookEdit path; anything outside the agent folder, or inside `state/`/`.git/`, is denied, and writes are limited to `memory/` and `workspace/`. Agent hooks run too; a deny from any hook wins.
+- **Not yet contained**: Bash commands, the agent's own hook scripts and stdio MCP servers are ordinary processes of the worker user. The SDK's bubblewrap sandbox only wraps Bash (see the plan review), so Phase 3 should wrap the whole CLI in an outer bwrap jail; the launcher is already the single exec point where that goes. Until then, treat agents as trusted code.
+- The CLI's process group is not killed on cancel yet (the SDK terminates the CLI; children started by Bash may outlive it). Phase 3's jail with `--die-with-parent` covers this.
+
+Known gaps carried forward: events live only in Redis (AOF on), not archived to Postgres; Bedrock/Vertex credential sets are rejected until Phase 5; `TestCredentialSet` is not implemented; deleting an agent leaves its conversations in the database.
 
 ## Phased delivery
 

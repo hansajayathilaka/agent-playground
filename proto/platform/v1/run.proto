@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package platform.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Runs are executed by background workers, never inside a request. A run is
+// one turn of a conversation; StartRun is a one-turn conversation. Output
+// streams through EventService.WatchEvents.
+service RunService {
+  rpc StartRun(StartRunRequest) returns (StartRunResponse);
+  rpc GetRun(GetRunRequest) returns (GetRunResponse);
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  // Idempotent. A queued run is cancelled at once; a running run is asked to
+  // stop and reaches CANCELLED when the worker confirms.
+  rpc CancelRun(CancelRunRequest) returns (CancelRunResponse);
+}
+
+// Chat-style multi-turn conversations. One conversation is one agent SDK
+// session; each message queues one run behind the agent's lock.
+service ConversationService {
+  rpc CreateConversation(CreateConversationRequest) returns (CreateConversationResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
+}
+
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  RUN_STATUS_QUEUED = 1;
+  RUN_STATUS_RUNNING = 2;
+  RUN_STATUS_SUCCEEDED = 3;
+  RUN_STATUS_FAILED = 4;
+  RUN_STATUS_CANCELLED = 5;
+  // The worker stopped (crash, shutdown) while the run was in progress.
+  RUN_STATUS_INTERRUPTED = 6;
+}
+
+message RunUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  double cost_usd = 3;
+  int32 num_turns = 4;
+  int64 duration_ms = 5;
+}
+
+message Run {
+  string id = 1;
+  string conversation_id = 2;
+  string agent_slug = 3;
+  string prompt = 4;
+  RunStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp started_at = 7;
+  google.protobuf.Timestamp finished_at = 8;
+  string error = 9;
+  // Credential set used (or requested); never the secret.
+  string credential_set_id = 10;
+  RunUsage usage = 11;
+}
+
+message Conversation {
+  string id = 1;
+  string agent_slug = 2;
+  string title = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  // Credential set override for every turn; empty means agent.json, then
+  // the default set.
+  string credential_set_id = 6;
+}
+
+message StartRunRequest {
+  string agent_slug = 1;
+  string prompt = 2;
+  string credential_set_id = 3;
+}
+
+message StartRunResponse {
+  Run run = 1;
+  Conversation conversation = 2;
+}
+
+message GetRunRequest {
+  string run_id = 1;
+}
+
+message GetRunResponse {
+  Run run = 1;
+}
+
+message ListRunsRequest {
+  // Filter by agent and/or conversation. Newest first unless filtered by
+  // conversation (then oldest first).
+  string agent_slug = 1;
+  string conversation_id = 2;
+  // Default 100, max 1000.
+  int32 limit = 3;
+}
+
+message ListRunsResponse {
+  repeated Run runs = 1;
+}
+
+message CancelRunRequest {
+  string run_id = 1;
+}
+
+message CancelRunResponse {
+  Run run = 1;
+}
+
+message CreateConversationRequest {
+  string agent_slug = 1;
+  string title = 2;
+  string credential_set_id = 3;
+}
+
+message CreateConversationResponse {
+  Conversation conversation = 1;
+}
+
+message SendMessageRequest {
+  string conversation_id = 1;
+  string text = 2;
+  // Override for this turn only.
+  string credential_set_id = 3;
+}
+
+message SendMessageResponse {
+  Run run = 1;
+}
+
+message ListConversationsRequest {
+  string agent_slug = 1;
+}
+
+message ListConversationsResponse {
+  // Most recently active first.
+  repeated Conversation conversations = 1;
+}
+
+message GetConversationRequest {
+  string conversation_id = 1;
+}
+
+message GetConversationResponse {
+  Conversation conversation = 1;
+  // Every turn, oldest first.
+  repeated Run runs = 2;
+  // Queued run ids waiting for this agent's lock (across all of the agent's
+  // conversations), oldest first, so clients can show what a turn waits on.
+  repeated string agent_queue = 3;
+}

@@ -1,4 +1,5 @@
-"""Composition root: the only place that picks concrete adapters."""
+"""API composition: builds core services on the shared infrastructure and
+registers the gRPC servicers. Adapters are picked in playground_adapters.wiring."""
 
 from __future__ import annotations
 
@@ -12,24 +13,36 @@ from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 
 from playground_adapters.auth import StaticAdminAuthProvider
-from playground_adapters.fs_store import LocalAgentStore
-from playground_adapters.memory import InMemoryAgentRepository, InMemorySessionStore
-from playground_adapters.templates import FsTemplateCatalog
+from playground_adapters.wiring import Infra, build_infra
 from playground_api.config import Settings
 from playground_api.guard import GuardInterceptor
-from playground_api.servicers import AgentServicer, AuthServicer, FileServicer
-from playground_core.clock import SystemClock
-from playground_core.ports import AgentRepository, SessionStore
+from playground_api.servicers import (
+    AgentServicer,
+    AuthServicer,
+    ConversationServicer,
+    CredentialServicer,
+    EventServicer,
+    FileServicer,
+    RunServicer,
+)
 from playground_core.services.agents import AgentService
 from playground_core.services.auth import AuthService
+from playground_core.services.conversations import ConversationService
+from playground_core.services.credentials import CredentialService
 from playground_core.services.files import FileService
 from playground_proto.platform.v1 import (
     agent_pb2,
     agent_pb2_grpc,
     auth_pb2,
     auth_pb2_grpc,
+    credential_pb2,
+    credential_pb2_grpc,
+    event_pb2,
+    event_pb2_grpc,
     file_pb2,
     file_pb2_grpc,
+    run_pb2,
+    run_pb2_grpc,
 )
 
 log = logging.getLogger(__name__)
@@ -37,52 +50,50 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class Container:
+    infra: Infra
     agents: AgentService
     files: FileService
     auth: AuthService
+    credentials: CredentialService
+    conversations: ConversationService
+    watch_heartbeat_seconds: float = 15.0
 
 
-async def _agent_repository(settings: Settings, stack: AsyncExitStack) -> AgentRepository:
-    if settings.agent_index_driver == "memory":
-        return InMemoryAgentRepository()
-    from psycopg_pool import AsyncConnectionPool
-
-    from playground_adapters.postgres import Pool, PostgresAgentRepository, migrate
-
-    pool: Pool = AsyncConnectionPool(settings.database_url, min_size=1, max_size=10, open=False)
-    await pool.open(wait=True, timeout=30)
-    stack.push_async_callback(pool.close)
-    applied = await migrate(pool)
-    if applied:
-        log.info("applied migrations: %s", ", ".join(applied))
-    return PostgresAgentRepository(pool)
-
-
-async def _session_store(settings: Settings, stack: AsyncExitStack) -> SessionStore:
-    if settings.session_driver == "memory":
-        return InMemorySessionStore()
-    from redis.asyncio import Redis
-
-    from playground_adapters.redis_sessions import RedisSessionStore
-
-    client = Redis.from_url(settings.redis_url)  # pyright: ignore[reportUnknownMemberType]
-    stack.push_async_callback(client.aclose)
-    await client.ping()  # pyright: ignore[reportUnknownMemberType]
-    return RedisSessionStore(client)
-
-
-async def build_container(settings: Settings, stack: AsyncExitStack) -> Container:
-    clock = SystemClock()
-    store = LocalAgentStore(settings.agents_root)
-    repo = await _agent_repository(settings, stack)
-    sessions = await _session_store(settings, stack)
-    agents = AgentService(store, repo, FsTemplateCatalog(settings.templates_root), clock)
-    await agents.reconcile()
+def build_services(infra: Infra, settings: Settings) -> Container:
+    agents = AgentService(infra.store, infra.agents, infra.templates, infra.clock)
     provider = StaticAdminAuthProvider(
         settings.admin_username, settings.admin_password.get_secret_value()
     )
-    auth = AuthService(provider, sessions, clock, timedelta(seconds=settings.session_ttl_seconds))
-    return Container(agents, FileService(store, agents), auth)
+    auth = AuthService(
+        provider, infra.sessions, infra.clock, timedelta(seconds=settings.session_ttl_seconds)
+    )
+    credentials = CredentialService(infra.credentials, infra.secrets, infra.store, infra.clock)
+    conversations = ConversationService(
+        infra.conversations,
+        infra.runs,
+        agents,
+        infra.store,
+        credentials,
+        infra.queue,
+        infra.events,
+        infra.control,
+        infra.clock,
+    )
+    return Container(
+        infra,
+        agents,
+        FileService(infra.store, agents),
+        auth,
+        credentials,
+        conversations,
+        settings.watch_heartbeat_seconds,
+    )
+
+
+async def build_container(settings: Settings, stack: AsyncExitStack) -> Container:
+    container = build_services(await build_infra(settings, stack), settings)
+    await container.agents.reconcile()
+    return container
 
 
 async def build_server(container: Container) -> aio.Server:
@@ -98,11 +109,25 @@ async def build_server(container: Container) -> aio.Server:
     auth_pb2_grpc.add_AuthServiceServicer_to_server(AuthServicer(container.auth), server)
     agent_pb2_grpc.add_AgentServiceServicer_to_server(AgentServicer(container.agents), server)
     file_pb2_grpc.add_FileServiceServicer_to_server(FileServicer(container.files), server)
+    run_pb2_grpc.add_RunServiceServicer_to_server(RunServicer(container.conversations), server)
+    run_pb2_grpc.add_ConversationServiceServicer_to_server(
+        ConversationServicer(container.conversations), server
+    )
+    event_pb2_grpc.add_EventServiceServicer_to_server(
+        EventServicer(container.conversations, container.watch_heartbeat_seconds), server
+    )
+    credential_pb2_grpc.add_CredentialServiceServicer_to_server(
+        CredentialServicer(container.credentials), server
+    )
 
     names = [
         auth_pb2.DESCRIPTOR.services_by_name["AuthService"].full_name,
         agent_pb2.DESCRIPTOR.services_by_name["AgentService"].full_name,
         file_pb2.DESCRIPTOR.services_by_name["FileService"].full_name,
+        run_pb2.DESCRIPTOR.services_by_name["RunService"].full_name,
+        run_pb2.DESCRIPTOR.services_by_name["ConversationService"].full_name,
+        event_pb2.DESCRIPTOR.services_by_name["EventService"].full_name,
+        credential_pb2.DESCRIPTOR.services_by_name["CredentialService"].full_name,
     ]
     await _add_health(server, names)
     reflection.enable_server_reflection(

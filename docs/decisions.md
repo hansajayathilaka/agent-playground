@@ -1,6 +1,6 @@
 # Decision log
 
-Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20 were implementation choices made in Phase 1 and are open for review. Details: [architecture.md](architecture.md).
+Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20 were implementation choices made in Phase 1, and 21-27 in Phase 2; they are open for review. Details: [architecture.md](architecture.md).
 
 | # | Topic | Decision | Notes |
 | --- | --- | --- | --- |
@@ -24,3 +24,10 @@ Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20
 | 18 | `WriteFile` shape | Unary with etag (`if_match`) and `create_only`, 3 MiB cap | The plan said "stream", but client streaming is banned for browser support. Larger files get a chunked-upload flow later |
 | 19 | Login sessions | Opaque random bearer tokens; the `SessionStore` keeps only a SHA-256 of each token (Redis with TTL in v1); admin password from `ADMIN_PASSWORD` | Keeps `AuthProvider` swappable for OIDC later |
 | 20 | Envoy routing | One listener on :8080: `/platform.v1.*` and `/grpc.*` go to the API, everything else to the web UI | Same origin, so no CORS; native gRPC clients use the same port |
+| 21 | Queue design | Per-agent Redis list + `wake` stream (consumer group) as hints + Lua-checked lease lock; a job whose holder died returns once as `recovered` and is marked `interrupted` | Gives per-agent FIFO without the promote race in "defer to pending list"; addresses the review's lock-release concern |
+| 22 | Event log | One Redis stream per conversation, entry id `0-<offset>` from an INCR counter; `WatchEvents` keyed by conversation | Clients resume with a plain integer offset. Postgres archiving deferred to Phase 6 |
+| 23 | Event envelope | Typed `oneof` in `event.proto`; core event kinds are named exactly like the oneof fields | Clients get typed events; adding a kind = core enum + proto field |
+| 24 | Run env | `cli_path` = `playground-claude-launcher`, which strips the worker's own env before exec'ing the bundled CLI | The SDK always inherits `os.environ`; this is also where Phase 3's outer sandbox will go |
+| 25 | File-tool guard in Phase 2 | Platform `PreToolUse` hook confines file tools to the agent folder and writes to `memory/` + `workspace/` | Planned for Phase 3, pulled forward because runs became real. Bash, hooks and stdio MCP stay uncontained until Phase 3 |
+| 26 | Secrets | AES-256-GCM, `SECRETS_KEY` (base64 32 bytes) in API and worker env, record id as associated data | Write-only through the API; only the worker decrypts |
+| 27 | Settings | `DATABASE_DRIVER` / `REDIS_DRIVER` replace Phase 1's `AGENT_INDEX_DRIVER` / `SESSION_DRIVER` | One switch per backend now that more ports share them |

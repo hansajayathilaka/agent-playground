@@ -6,15 +6,27 @@ adapter must pass.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Collection, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
+from playground_core.events import Event, EventKind
 from playground_core.models import (
     AgentRecord,
+    ControlMessage,
+    Conversation,
+    CredentialSet,
     FileContent,
     FileEntry,
+    Job,
+    Lease,
     Principal,
+    Run,
+    RunStatus,
+    RunUsage,
     Template,
     WriteResult,
 )
@@ -105,3 +117,207 @@ class AuthProvider(Protocol):
 
 class Clock(Protocol):
     def now(self) -> datetime: ...
+
+
+# -- Phase 2: runs -------------------------------------------------------------
+
+
+class JobQueue(Protocol):
+    """Run jobs with one-at-a-time execution per agent, in enqueue order.
+
+    ``claim`` returns a lease only together with that agent's lock, so a
+    holder of a lease is the only one running that agent. Jobs are delivered
+    at most once to a live worker: a job whose holder died comes back exactly
+    once with ``recovered=True`` (the platform never re-runs it blindly).
+    """
+
+    async def enqueue(self, job: Job) -> None: ...
+
+    async def claim(self, consumer: str, timeout: float) -> Lease | None:
+        """Wait up to ``timeout`` seconds for a runnable job."""
+        ...
+
+    async def renew(self, lease: Lease, ttl: timedelta) -> bool:
+        """Extend the agent lock. False if it was lost (expired and taken)."""
+        ...
+
+    async def complete(self, lease: Lease) -> None:
+        """Drop the job, release the agent lock, and make the agent's next
+        queued job claimable."""
+        ...
+
+    async def queued(self, agent_slug: str) -> Sequence[str]:
+        """Run ids waiting for this agent, oldest first (not the running one)."""
+        ...
+
+    async def recover(self) -> int:
+        """Make jobs whose holder died claimable again. Returns how many
+        agents were woken. Safe to call from every worker periodically."""
+        ...
+
+
+class EventLog(Protocol):
+    """Append-only event stream per conversation, replayable by offset."""
+
+    async def append(self, event: Event) -> int:
+        """Store the event; returns its offset (1, 2, 3, ... per conversation)."""
+        ...
+
+    async def read(self, conversation_id: str, after: int, limit: int) -> Sequence[Event]:
+        """Events with offset > after, oldest first, at most ``limit``."""
+        ...
+
+    def tail(self, conversation_id: str, after: int) -> AsyncIterator[Event]:
+        """Replay from ``after`` and then follow new events until cancelled."""
+        ...
+
+
+class ControlChannel(Protocol):
+    """Commands from the API to the worker running a given run."""
+
+    async def publish(self, message: ControlMessage) -> None: ...
+
+    def subscribe(self, run_id: str) -> AbstractAsyncContextManager[AsyncIterator[ControlMessage]]:
+        """Subscribed once ``__aenter__`` returns: every message published for
+        ``run_id`` after that is delivered to the iterator until exit."""
+        ...
+
+
+class ConversationRepository(Protocol):
+    async def add(self, conversation: Conversation) -> None: ...
+
+    async def get(self, conversation_id: str) -> Conversation | None: ...
+
+    async def list(self, agent_slug: str) -> Sequence[Conversation]:
+        """Newest first (by updated_at)."""
+        ...
+
+    async def update(self, conversation: Conversation) -> None:
+        """NotFoundError if unknown."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class RunChanges:
+    """Fields a status transition may set (None = leave unchanged)."""
+
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    worker: str | None = None
+    error: str | None = None
+    credential_set_id: str | None = None
+    usage: RunUsage | None = None
+
+
+class RunRepository(Protocol):
+    async def add(self, run: Run) -> None: ...
+
+    async def get(self, run_id: str) -> Run | None: ...
+
+    async def list(
+        self, *, conversation_id: str = "", agent_slug: str = "", limit: int = 100
+    ) -> Sequence[Run]:
+        """Oldest first within a conversation; newest first otherwise."""
+        ...
+
+    async def transition(
+        self,
+        run_id: str,
+        expected: Collection[RunStatus],
+        to: RunStatus,
+        changes: RunChanges | None = None,
+    ) -> Run | None:
+        """Compare-and-set the status. Returns the updated run, or None when
+        the run is missing or its status is not in ``expected``."""
+        ...
+
+    async def heartbeat(self, run_id: str, at: datetime) -> None: ...
+
+    async def stale(self, before: datetime) -> Sequence[Run]:
+        """Running runs whose heartbeat is older than ``before``."""
+        ...
+
+
+class CredentialRepository(Protocol):
+    async def add(self, cred: CredentialSet) -> None:
+        """AlreadyExistsError on a duplicate name."""
+        ...
+
+    async def get(self, cred_id: str) -> CredentialSet | None: ...
+
+    async def get_by_name(self, name: str) -> CredentialSet | None: ...
+
+    async def get_default(self) -> CredentialSet | None: ...
+
+    async def list(self) -> Sequence[CredentialSet]:
+        """Ordered by name."""
+        ...
+
+    async def update(self, cred: CredentialSet) -> None:
+        """NotFoundError if unknown, AlreadyExistsError on a duplicate name."""
+        ...
+
+    async def set_default(self, cred_id: str) -> None:
+        """Make this the only default. NotFoundError if unknown."""
+        ...
+
+    async def remove(self, cred_id: str) -> None: ...
+
+
+class SecretStore(Protocol):
+    """Encrypts secrets at rest. Ciphertext is opaque to everything else."""
+
+    def encrypt(self, plaintext: bytes, *, context: str) -> bytes:
+        """``context`` is bound to the ciphertext (AEAD associated data), so a
+        ciphertext copied to another record fails to decrypt."""
+        ...
+
+    def decrypt(self, ciphertext: bytes, *, context: str) -> bytes: ...
+
+
+# -- AgentRunner -----------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RunRequest:
+    run_id: str
+    conversation_id: str
+    agent_slug: str
+    prompt: str
+    # SDK session to resume; empty starts a new session.
+    resume_session_id: str
+    model: str | None
+    max_turns: int | None
+    max_budget_usd: float | None
+    # Provider env for this run only (credentials included). The runner must
+    # not add the worker's own environment to it.
+    env: Mapping[str, str] = field(default_factory=dict[str, str])
+
+
+@dataclass(frozen=True, slots=True)
+class RunOutcome:
+    session_id: str
+    status: RunStatus  # SUCCEEDED, FAILED or CANCELLED
+    error: str = ""
+    usage: RunUsage = field(default_factory=RunUsage)
+
+
+class EventSink(Protocol):
+    async def __call__(
+        self, kind: EventKind, data: Mapping[str, Any], *, parent_tool_use_id: str = ""
+    ) -> None: ...
+
+
+class AgentRunner(Protocol):
+    """Executes one agent turn."""
+
+    async def run(
+        self,
+        request: RunRequest,
+        emit: EventSink,
+        cancel: asyncio.Event,
+    ) -> RunOutcome:
+        """Run the turn, emitting events as they happen. When ``cancel`` is
+        set the runner must stop promptly and return status CANCELLED."""
+        ...

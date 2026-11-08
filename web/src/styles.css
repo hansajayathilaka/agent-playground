@@ -314,19 +314,207 @@ ul {
   color: var(--warn);
 }
 
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+}
+.tab {
+  border-color: transparent;
+  background: none;
+}
+.tab.active {
+  border-color: var(--border);
+  background: var(--hover);
+  font-weight: 600;
+}
+.ellipsis {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.conversations {
+  width: 240px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  overflow: auto;
+}
+.conversation {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.transcript {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+}
+.bubble {
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bubble.user {
+  align-self: flex-end;
+  max-width: 80%;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.bubble.agent {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.text.streaming::after {
+  content: "▍";
+  color: var(--muted);
+}
+.turn-meta {
+  font-size: 0.8rem;
+}
+.turn-meta.bad {
+  color: var(--bad);
+}
+.status.running {
+  color: var(--accent);
+}
+.tool {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg);
+  white-space: normal;
+}
+.tool.bad {
+  border-color: var(--bad);
+}
+.tool summary {
+  cursor: pointer;
+}
+.tool-io {
+  margin: 0.4rem 0;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.subagent {
+  border-left: 3px solid var(--accent);
+  margin: 0.4rem 0 0.4rem 0.25rem;
+  padding-left: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  white-space: pre-wrap;
+}
+.thinking summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+.notice.error {
+  color: var(--bad);
+}
+.notice.warning {
+  color: var(--warn);
+}
+.composer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.composer textarea {
+  resize: vertical;
+}
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.credentials {
+  overflow: auto;
+}
+.cred-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem;
+  align-items: flex-start;
+}
+.cred-table {
+  flex: 1 1 480px;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.cred-table th,
+.cred-table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.row-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.cred-form {
+  flex: 0 1 380px;
+}
+.card label.inline {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.card label.inline input {
+  width: auto;
+}
+
 @media (max-width: 800px) {
   .main,
-  .workspace-body {
+  .workspace-body,
+  .chat {
     flex-direction: column;
   }
   .sidebar,
-  .files {
+  .files,
+  .conversations {
     width: auto;
     max-height: 30vh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
-  .editor {
+  .editor,
+  .conversation {
     min-height: 60vh;
   }
 }
