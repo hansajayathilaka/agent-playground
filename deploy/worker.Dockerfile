@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/opt/venv
 RUN pip install --no-cache-dir uv==0.11.32 \
  && apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates ripgrep \
+ && apt-get install -y --no-install-recommends git ca-certificates ripgrep bubblewrap \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,13 +22,18 @@ COPY platform platform
 COPY agents/templates agents/templates
 RUN uv sync --frozen --no-dev --package playground-worker --no-editable
 
-# Runs as an unprivileged user. Phase 3 adds the bubblewrap sandbox, which
-# needs extra privileges for this container only (decision 7).
+# Agents run in a bubblewrap jail (platform/worker/.../jail.py), which needs
+# user namespaces and a fresh /proc, so compose runs this container
+# privileged (decision 7). The entrypoint starts as root only to delegate a
+# cgroup v2 subtree for per-run limits, then drops to the playground user
+# with no capabilities; the worker itself never runs as root.
 RUN useradd --system --uid 10001 --home /data/home playground \
  && mkdir -p /data/agents /data/sessions /data/home && chown -R playground /data
-USER playground
+COPY deploy/worker-entrypoint.sh /usr/local/bin/worker-entrypoint
 ENV PATH=/opt/venv/bin:$PATH \
     AGENTS_ROOT=/data/agents \
     SESSIONS_ROOT=/data/sessions \
-    TEMPLATES_ROOT=/app/agents/templates
+    TEMPLATES_ROOT=/app/agents/templates \
+    RUN_RUNTIME_DIR=/run/playground
+ENTRYPOINT ["/usr/local/bin/worker-entrypoint"]
 CMD ["playground-worker"]

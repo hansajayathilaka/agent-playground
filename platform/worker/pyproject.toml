@@ -13,6 +13,7 @@ dependencies = [
 playground-worker = "playground_worker.main:run"
 # cli_path for the SDK: re-execs the bundled Claude CLI with only the run's env.
 playground-claude-launcher = "playground_worker.launcher:main"
+playground-worker-selfcheck = "playground_worker.selfcheck:main"
 
 [build-system]
 requires = ["hatchling"]

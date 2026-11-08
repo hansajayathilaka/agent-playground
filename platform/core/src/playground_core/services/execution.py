@@ -18,7 +18,7 @@ from typing import Any
 from playground_core.errors import DomainError, FailedPreconditionError, NotFoundError
 from playground_core.events import Event, EventKind
 from playground_core.manifest import MANIFEST_FILE, AgentManifest
-from playground_core.models import ControlKind, Lease, Run, RunStatus
+from playground_core.models import ControlKind, Lease, Run, RunLimits, RunStatus
 from playground_core.ports import (
     AgentRunner,
     AgentStore,
@@ -186,6 +186,13 @@ class RunExecutor:
             max_turns=manifest.limits.max_turns,
             max_budget_usd=manifest.limits.max_budget_usd,
             env=env,
+            limits=RunLimits(
+                timeout_seconds=manifest.limits.timeout_seconds,
+                memory_mb=manifest.limits.memory_mb,
+                cpus=manifest.limits.cpus,
+                max_processes=manifest.limits.max_processes,
+            ),
+            network_allowlist=tuple(manifest.network.allowlist),
         )
 
     async def _heartbeat(

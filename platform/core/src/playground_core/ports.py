@@ -25,6 +25,7 @@ from playground_core.models import (
     Lease,
     Principal,
     Run,
+    RunLimits,
     RunStatus,
     RunUsage,
     Template,
@@ -293,6 +294,9 @@ class RunRequest:
     # Provider env for this run only (credentials included). The runner must
     # not add the worker's own environment to it.
     env: Mapping[str, str] = field(default_factory=dict[str, str])
+    limits: RunLimits = field(default_factory=RunLimits)
+    # Hosts the run may reach; empty means open internet (decision 14).
+    network_allowlist: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

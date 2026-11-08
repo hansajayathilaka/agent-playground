@@ -59,6 +59,8 @@ known-first-party = [
 "platform/adapters/src/playground_adapters/postgres.py" = ["S608"]
 # String paths on purpose: realpath/commonpath semantics for the guard.
 "platform/worker/src/playground_worker/guard.py" = ["PTH"]
+# String paths on purpose: they become bwrap arguments verbatim.
+"platform/worker/src/playground_worker/jail.py" = ["PTH"]
 
 [tool.pyright]
 include = ["platform"]

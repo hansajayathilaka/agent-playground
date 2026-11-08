@@ -1,6 +1,6 @@
 # Decision log
 
-Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20 were implementation choices made in Phase 1, and 21-27 in Phase 2; they are open for review. Details: [architecture.md](architecture.md).
+Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20 were implementation choices made in Phase 1, 21-27 in Phase 2 and 28-34 in Phase 3; they are open for review. Details: [architecture.md](architecture.md).
 
 | # | Topic | Decision | Notes |
 | --- | --- | --- | --- |
@@ -31,3 +31,10 @@ Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20
 | 25 | File-tool guard in Phase 2 | Platform `PreToolUse` hook confines file tools to the agent folder and writes to `memory/` + `workspace/` | Planned for Phase 3, pulled forward because runs became real. Bash, hooks and stdio MCP stay uncontained until Phase 3 |
 | 26 | Secrets | AES-256-GCM, `SECRETS_KEY` (base64 32 bytes) in API and worker env, record id as associated data | Write-only through the API; only the worker decrypts |
 | 27 | Settings | `DATABASE_DRIVER` / `REDIS_DRIVER` replace Phase 1's `AGENT_INDEX_DRIVER` / `SESSION_DRIVER` | One switch per backend now that more ports share them |
+| 28 | Outer jail | The launcher (`cli_path`) execs `bwrap` around the whole Claude CLI, so Bash, agent hooks, stdio MCP servers and file tools are all confined. The jail lives in the worker next to the Claude runner, not behind a core `Sandbox` port | Refines decision 7: the SDK's own sandbox only wraps Bash. The jail wraps the process the SDK spawns, so it is part of the Claude runner adapter |
+| 29 | Network in the jail | No direct network (own netns, loopback only). HTTP(S) goes through a per-run egress proxy in the worker: the model endpoint is always allowed, an `agent.json` allowlist limits hosts, and with no allowlist any public address is allowed but private, loopback and link-local ones are refused | Keeps agents away from Redis, Postgres, the API and cloud metadata. Changes what "open internet" (decision 14) means: HTTP(S) only, no raw TCP or SSH. `SANDBOX_NETWORK=host` turns it off |
+| 30 | Resource limits | Wall-clock timeout, cgroup v2 memory/CPU/process limits per run, rlimits (no core dumps, file size, open files). `agent.json` `limits.timeout_seconds`, `memory_mb`, `cpus`, `max_processes` override worker defaults (`RUN_*`) | Without a delegated cgroup v2 subtree the worker still runs, with only the timeout and rlimits, and logs why |
+| 31 | Worker container privileges | `privileged: true` and `cgroup: private`. The entrypoint starts as root only to delegate a cgroup subtree, then drops to uid 10001 with no capabilities and `no_new_privs` | Simplest setup that lets bwrap mount a fresh `/proc` and the worker write cgroups (decision 7 allows it). Hosts that block unprivileged user namespaces need a sysctl |
+| 32 | Builder's jail view | The `_builder` agent can read every agent folder (except `state/`, `.git/` and deleted agents) but writes only its own `memory/` and `workspace/` | Cross-agent writes go through the platform MCP tools in Phase 4, which run in the worker and use `resolve_agent_path()` |
+| 33 | Writable dirs | `memory/` and `workspace/` must be real directories; a symlinked one fails the run before the CLI starts | A bind mount follows symlinks on the host side, so a symlink would expose its target writable |
+| 34 | Sandbox off switch | `SANDBOX_MODE=none` runs the CLI unjailed, for development only; the worker logs a warning. The worker refuses to start if `bwrap` can't build a jail and the mode is `bwrap` | CI fails instead of skipping the escape suite (`REQUIRE_SANDBOX=1`) |
