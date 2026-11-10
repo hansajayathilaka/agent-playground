@@ -1,0 +1,14 @@
+{
+  "description": "Edits photos and videos: resize, crop, convert, adjust, trim and extract frames.",
+  "tags": [
+    "media",
+    "photo",
+    "video"
+  ],
+  "status": "active",
+  "permission_mode": "acceptEdits",
+  "model": "",
+  "max_turns": 50,
+  "workdirs": [],
+  "connectors": []
+}

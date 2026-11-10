@@ -1,0 +1,7 @@
+{
+  "name": "fetch",
+  "description": "Fetch web pages as markdown (when WebFetch isn't enough, e.g. raw HTML or long pages).",
+  "tags": ["web"],
+  "needs": ["uv"],
+  "server": { "command": "uvx", "args": ["mcp-server-fetch"] }
+}

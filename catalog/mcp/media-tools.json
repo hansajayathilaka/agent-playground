@@ -1,0 +1,10 @@
+{
+  "name": "media-tools",
+  "description": "Playground's own photo and video tools: inspect, resize, crop, convert and adjust images (Pillow); probe, trim, convert, extract frames and audio from video (ffmpeg).",
+  "tags": ["media", "photo", "video"],
+  "needs": ["uv", "ffmpeg (video tools only)"],
+  "server": {
+    "command": "uv",
+    "args": ["run", "--script", "${PLAYGROUND_ROOT}/catalog/tools/media/server.py"]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "filesystem",
+  "description": "Read and write files in extra folders outside the agent's own (edit the path after adding).",
+  "tags": ["files"],
+  "needs": ["node"],
+  "server": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"] }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Agent Playground",
+  "agents_dir": "agents",
+  "runs_dir": ".playground/runs",
+  "catalog_dir": "catalog",
+  "template_dir": "templates/agent"
+}

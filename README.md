@@ -1,44 +1,64 @@
 # Agent Playground
 
-A platform for creating and running many Claude Agent SDK agents. Each agent lives in its own folder (CLAUDE.md, rules, memory, settings, MCP config, hooks, skills, subagents), runs in a background worker sandboxed to that folder, and streams its output to any client. A Builder agent creates and edits the other agents.
+Build and run many agents on top of Claude Code, on your own Claude subscription. There is no server and no app to keep up to date: every agent is a plain Claude Code folder, so new Claude features (models, skills, connectors, tools) reach every agent the day they ship.
 
-Status: Phases 1-3 implemented: create and edit agent folders, add model credentials, and chat with agents in the browser (background runs, live streaming, multi-turn sessions, cancel). Every run is jailed with bubblewrap to its own folder, with filtered network egress and per-run resource limits. The Builder (Phase 4) comes next. The worker container runs privileged; on Ubuntu 24.04+ hosts set `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (see docs/architecture.md, "Phase 3 as built").
+- **Agents are folders.** `agents/<name>/` holds the agent's CLAUDE.md, skills, subagents, MCP servers, generated tools, workspace and memory. Open the folder in Claude Code or Cowork and you are talking to that agent, in its own working directory.
+- **An agent that builds agents.** `/playground:build-agent` interviews you, designs the agent, writes the folder, wires MCP servers and generates custom tools, checks it, smoke-tests it and commits it.
+- **Plug anything in.** MCP servers per agent (`.mcp.json`, with a ready catalog including photo and video tools), claude.ai connectors from your account, and generated code under `tools/`.
+- **Delegate in the background.** From the hub, `/playground:delegate <agent> <task>` runs `claude -p` in the agent's folder, records the run, and lets you follow it, resume it or start several in parallel.
+- **See what's there and what's running.** The `playground-hud` mod adds a side pane (agents with their skills, MCP servers, tools and connectors; ongoing and recent runs; buttons to run, edit and add) and a status band while runs are going. `/playground:status` gives the same as text where mods don't draw (Cowork, chat).
 
-## Quick start
+## Set up (once)
 
-```bash
-cp deploy/.env.example deploy/.env      # set ADMIN_PASSWORD and SECRETS_KEY
-docker compose -f deploy/compose.yaml up -d --build
-```
-
-Open http://localhost:8080, sign in as `admin`, add a credential set under Credentials, then open an agent's Chat tab. Native gRPC clients use the same port (`grpcurl -plaintext localhost:8080 list`).
-
-## Development
-
-Open the repo in the devcontainer (it starts Postgres, Redis and Envoy), then:
+Needs Claude Code 2.1 or newer signed in with your subscription, Python 3.10+, and [uv](https://docs.astral.sh/uv/) for MCP servers written in Python (ffmpeg too for the video tools).
 
 ```bash
-uv sync && (cd web && pnpm install)
-uv run playground-api                  # API on :50051 (env from the devcontainer)
-uv run playground-worker               # runs agents (needs Redis + Postgres)
-(cd web && pnpm dev)                   # UI on :5173; Envoy on :8080 fronts both
-uv run pytest                          # Python tests (contract suites use TEST_DATABASE_URL / TEST_REDIS_URL)
-uv run ruff check platform && uv run pyright
-(cd web && pnpm lint && pnpm typecheck && pnpm test)
-scripts/generate.sh                    # after editing proto/ or agent.json schema
+git clone https://github.com/hansajayathilaka/agent-playground
+cd agent-playground
+claude plugin marketplace add ./      # the trailing slash matters; an absolute path works too
+claude plugin install playground@agent-playground
+claude plugin install playground-hud@agent-playground
+claude          # accept the trust dialog once: agent settings and MCP servers only apply in a trusted workspace
 ```
 
-Without the devcontainer, `DATABASE_DRIVER=memory REDIS_DRIVER=memory SECRETS_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= AGENTS_ROOT=./data/agents TEMPLATES_ROOT=agents/templates ADMIN_PASSWORD=dev uv run playground-api` runs the API with no Postgres or Redis (file editing only: runs need a worker sharing Redis).
+The marketplace is this folder, so edits to the plugins apply after `/reload-plugins`. User scope (the default) makes the plugins load in the hub and in every agent folder.
 
-## Docs
+## Use it
 
-- [Architecture](docs/architecture.md): components, agent folder layout, SDK usage, isolation, gRPC API, job runners, credentials, phases.
-- [Decision log](docs/decisions.md): every decision made during planning.
-- Living plan with comments: https://claude.ai/artifact/8DNvqYQD6jHoP95k6qPCPv
+| You want to | Do this |
+| --- | --- |
+| Build an agent | In the repo root: `/playground:build-agent an agent that turns my voice memos into blog drafts` |
+| Change an agent | `/playground:build-agent edit media-editor add a watermark tool` |
+| Talk to one agent | `cd agents/media-editor && claude`, or open that folder in Cowork |
+| Hand off a task | `/playground:delegate media-editor make web versions of everything in workspace/in` |
+| Check on work | `/playground` (pane), or `/playground:status` |
+| Add an MCP server or connector | `/playground:add-mcp media-editor playwright` |
+| Generate a custom tool | `/playground:add-tool media-editor batch-rename photos by EXIF date` |
 
-## Stack at a glance
+The same steps work without slash commands: ask in plain words and Claude picks the skill.
 
-- Python core, API (`grpc.aio`) and workers (asyncio) on the Claude Agent SDK
-- TypeScript web UI; all clients use the protobuf/gRPC API through Envoy
-- Postgres + Redis behind pluggable ports
-- bubblewrap sandbox per run, Docker Compose deployment, devcontainer for local work
+From a terminal the helper does the bookkeeping directly: `python plugins/playground/scripts/pg.py list | runs | show <id> | run <agent> "<task>" --background`.
+
+### Where each Claude surface fits
+
+- **Claude Code (terminal, desktop, IDE)**: everything, including the pane and background runs.
+- **Cowork**: open an agent folder (or the hub) as the working folder; skills, MCP servers and connectors work, the pane may not draw, so use `/playground:status`.
+- **Claude chat**: no folders. Upload a skill (for example an agent's skill folder, zipped) and use connectors there; keep the agent's source of truth in the repo.
+
+## Layout
+
+```
+playground.json            marks the workspace root
+CLAUDE.md                  hub instructions (the coordinator and builder)
+agents/<name>/             one folder per agent (see agent-spec.md)
+templates/agent/           starting point for new agents
+catalog/mcp/*.json         MCP servers ready to add; catalog/tools/ holds shared server code
+plugins/playground/        plugin: build-agent, add-tool, add-mcp, delegate, status skills, agent-builder subagent, scripts/pg.py
+plugins/playground-hud/    Claude Code mod: pane, status band, /playground
+tests/                     python -m unittest discover -s tests
+docs/                      architecture and decisions
+```
+
+The agent folder contract is [plugins/playground/skills/build-agent/agent-spec.md](plugins/playground/skills/build-agent/agent-spec.md). Design notes: [docs/architecture.md](docs/architecture.md), [docs/decisions.md](docs/decisions.md).
+
+The earlier standalone platform (Python worker, gRPC API, web UI, bubblewrap isolation) is in git history up to commit `f46538e`.

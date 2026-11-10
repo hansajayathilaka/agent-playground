@@ -1,135 +1,33 @@
-name: CI
+name: ci
 
 on:
   push:
     branches: [master]
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
-  python:
+  test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: playground
-          POSTGRES_PASSWORD: playground
-          POSTGRES_DB: playground_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U playground" --health-interval 5s
-          --health-timeout 3s --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping" --health-interval 5s
-          --health-timeout 3s --health-retries 20
-    env:
-      TEST_DATABASE_URL: postgresql://playground:playground@localhost:5432/playground_test
-      TEST_REDIS_URL: redis://localhost:6379/15
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
         with:
-          version: "0.11.32"
           python-version: "3.12"
-      - name: Install bubblewrap for the sandbox escape suite
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
-          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - run: uv sync --frozen
-      - run: uv run ruff format --check platform
-      - run: uv run ruff check platform
-      - run: uv run pyright
-      - run: uv run pytest -ra
-        env:
-          # Fail instead of skipping if the jail can't start in CI.
-          REQUIRE_SANDBOX: "1"
-
-  web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: web/package.json
+      - uses: astral-sh/setup-uv@v6
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
-
-  proto:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.11.32"
-          python-version: "3.12"
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: web/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - run: uv sync --frozen
-      - run: pnpm install --frozen-lockfile
-        working-directory: web
-      - name: buf lint
-        run: ../web/node_modules/.bin/buf lint
-        working-directory: proto
-      - name: buf format
-        run: ../web/node_modules/.bin/buf format --diff --exit-code
-        working-directory: proto
-      - name: buf breaking (against master)
-        working-directory: proto
+          node-version: "22"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Python tests (end-to-end against a fake model API)
+        run: python -m unittest discover -s tests -v
+      - name: Validate plugins and marketplace
         run: |
-          if git cat-file -e origin/master:proto/buf.yaml 2>/dev/null; then
-            ../web/node_modules/.bin/buf breaking --against "../.git#ref=refs/remotes/origin/master,subdir=proto"
-          else
-            echo "No proto/ on master yet; nothing to compare against."
-          fi
-      - name: Generated code is up to date
+          claude plugin validate .
+          claude plugin validate plugins/playground
+          claude plugin validate plugins/playground-hud
+      - name: Mod tests
+        run: claude plugin test plugins/playground-hud
+      - name: Agent folders pass pg check
         run: |
-          scripts/generate.sh
-          git add -N .
-          git diff --exit-code
-
-  images:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -f deploy/api.Dockerfile -t agent-playground-api .
-      - run: docker build -f deploy/worker.Dockerfile -t agent-playground-worker .
-      - name: Worker image can find the bundled Claude CLI
-        run: docker run --rm agent-playground-worker python -c "from playground_worker.launcher import bundled_cli; print(bundled_cli())"
-      - name: Worker image can start a jail with cgroup limits (privileged, as in compose)
-        run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          docker run --rm --privileged --cgroupns=private agent-playground-worker \
-            playground-worker-selfcheck --require-cgroups
-      - run: docker build -f deploy/web.Dockerfile -t agent-playground-web .
-      - name: Validate Envoy config
-        run: |
-          for f in deploy/envoy/envoy.yaml deploy/envoy/envoy.dev.yaml; do
-            docker run --rm -v "$PWD/$f:/cfg.yaml:ro" envoyproxy/envoy:v1.34.1 \
-              envoy --mode validate -c /cfg.yaml
-          done
+          for d in agents/*/; do python plugins/playground/scripts/pg.py check "$(basename "$d")"; done

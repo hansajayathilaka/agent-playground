@@ -1,6 +1,0 @@
-{
-  "permissions": {
-    "allow": ["WebSearch", "WebFetch"],
-    "deny": []
-  }
-}

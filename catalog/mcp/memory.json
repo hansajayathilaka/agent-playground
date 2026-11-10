@@ -1,0 +1,11 @@
+{
+  "name": "memory",
+  "description": "Knowledge-graph memory (entities, relations, observations) kept in a local file. A starting point for a second brain.",
+  "tags": ["memory", "second-brain"],
+  "needs": ["node"],
+  "server": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-memory"],
+    "env": { "MEMORY_FILE_PATH": "./memory/graph.jsonl" }
+  }
+}

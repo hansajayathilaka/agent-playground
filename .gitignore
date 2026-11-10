@@ -3,7 +3,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
-.mypy_cache/
 node_modules/
 dist/
 build/
@@ -14,9 +13,15 @@ build/
 .DS_Store
 Thumbs.db
 .idea/
-data/
-.pyright/
-web/.vite/
 
-# Redis snapshots from local test servers
-*.rdb
+
+# Agent Playground run records (local to each machine)
+.playground/
+# Types the Claude Code engine lays beside a mod while developing it
+.claude-plugin/types/
+# Agent inputs and outputs (photos, videos, drafts) stay out of git
+agents/*/workspace/**
+!agents/*/workspace/**/
+!agents/*/workspace/**/.gitkeep
+# Local, per-machine Claude Code settings (may hold secrets)
+**/.claude/settings.local.json

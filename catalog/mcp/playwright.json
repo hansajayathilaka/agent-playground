@@ -1,0 +1,7 @@
+{
+  "name": "playwright",
+  "description": "Drive a real browser: open pages, click, fill forms, take screenshots.",
+  "tags": ["web", "browser"],
+  "needs": ["node"],
+  "server": { "command": "npx", "args": ["-y", "@playwright/mcp@latest"] }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "git",
+  "description": "Inspect and change git repositories (log, diff, branches, commits) through structured tools.",
+  "tags": ["code"],
+  "needs": ["uv"],
+  "server": { "command": "uvx", "args": ["mcp-server-git"] }
+}

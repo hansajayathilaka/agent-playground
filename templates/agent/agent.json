@@ -1,0 +1,10 @@
+{
+  "description": "{{description}}",
+  "tags": [],
+  "status": "active",
+  "permission_mode": "acceptEdits",
+  "model": "",
+  "max_turns": 50,
+  "workdirs": [],
+  "connectors": []
+}
