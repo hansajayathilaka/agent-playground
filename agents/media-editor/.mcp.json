@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "media-tools": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "../../catalog/tools/media/server.py"
+      ]
+    }
+  }
+}

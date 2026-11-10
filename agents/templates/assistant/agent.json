@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "name": "{{agent_name}}",
-  "description": "{{agent_description}}",
-  "tool_packs": ["web"],
-  "approvals": { "mode": "risky" },
-  "limits": { "max_turns": 50 },
-  "network": { "allowlist": [] }
-}

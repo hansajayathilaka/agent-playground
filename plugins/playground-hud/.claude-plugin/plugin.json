@@ -1,0 +1,7 @@
+{
+  "name": "playground-hud",
+  "version": "0.1.0",
+  "description": "Agent Playground pane and status band: agents, their skills, MCP servers and tools, and ongoing runs.",
+  "author": { "name": "hansajayathilaka" },
+  "types": "./types/index.d.ts"
+}

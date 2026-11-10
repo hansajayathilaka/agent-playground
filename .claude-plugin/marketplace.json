@@ -1,0 +1,17 @@
+{
+  "name": "agent-playground",
+  "owner": { "name": "hansajayathilaka" },
+  "metadata": { "description": "Build and run many Claude Code agents, each in its own folder." },
+  "plugins": [
+    {
+      "name": "playground",
+      "source": "./plugins/playground",
+      "description": "Agent builder, delegation, tool and MCP wiring for an Agent Playground workspace."
+    },
+    {
+      "name": "playground-hud",
+      "source": "./plugins/playground-hud",
+      "description": "Side pane and status band showing agents, their capabilities and ongoing runs."
+    }
+  ]
+}

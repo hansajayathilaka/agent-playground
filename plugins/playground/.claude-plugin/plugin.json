@@ -1,0 +1,14 @@
+{
+  "name": "playground",
+  "version": "0.1.0",
+  "description": "Build agents as Claude Code folders, give them tools and MCP servers, and run tasks on them in the background.",
+  "author": {
+    "name": "hansajayathilaka"
+  },
+  "repository": "https://github.com/hansajayathilaka/agent-playground",
+  "keywords": [
+    "agents",
+    "builder",
+    "multi-agent"
+  ]
+}
