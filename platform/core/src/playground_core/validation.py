@@ -18,7 +18,6 @@ from playground_core.models import Diagnostic, Severity
 
 SETTINGS_FILE = ".claude/settings.json"
 MCP_FILE = ".mcp.json"
-VALIDATED_FILES = frozenset({MANIFEST_FILE, SETTINGS_FILE, MCP_FILE})
 
 # Env keys that look like secrets. Secrets belong in the credential manager,
 # never in agent folders.
@@ -114,6 +113,135 @@ def validate_mcp(content: bytes) -> list[Diagnostic]:
     return diags
 
 
+# -- markdown with frontmatter (skills, subagents, commands) ----------------------
+
+CONTEXT_FILE = "CLAUDE.md"
+_SKILL_RE = re.compile(r"^\.claude/skills/[^/]+/SKILL\.md$")
+_SUBAGENT_RE = re.compile(r"^\.claude/agents/[^/]+\.md$")
+_COMMAND_RE = re.compile(r"^\.claude/commands/.+\.md$")
+_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_FM_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):(.*)$")
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, str] | None, str]:
+    """Top-level ``key: value`` pairs of a leading ``---`` block, and the
+    body. Nested YAML values are kept as raw text. None when there is no
+    frontmatter block; ValueError when it is never closed."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None, text
+    out: dict[str, str] = {}
+    key = ""
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return out, "\n".join(lines[i + 1 :])
+        m = _FM_KEY_RE.match(line)
+        if m and not line.startswith((" ", "\t")):
+            key = m.group(1)
+            out[key] = _unquote(m.group(2).strip())
+        elif key and line.strip():
+            out[key] = (out[key] + "\n" + line.strip()).strip()
+    raise ValueError("frontmatter block is not closed with '---'")
+
+
+def _unquote(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+def _validate_named_markdown(path: str, content: bytes, what: str) -> list[Diagnostic]:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return [_error(path, "file is not valid UTF-8")]
+    try:
+        meta, body = parse_frontmatter(text)
+    except ValueError as e:
+        return [_warning(path, f"{e}; the SDK won't load this {what}")]
+    if meta is None:
+        return [
+            _warning(
+                path,
+                f"missing frontmatter: start the file with '---', 'name:' and "
+                f"'description:' lines so the SDK loads this {what}",
+            )
+        ]
+    out: list[Diagnostic] = []
+    name = meta.get("name", "")
+    if not name:
+        out.append(_warning(path, f"frontmatter needs a 'name' for this {what}", "/name"))
+    elif not _NAME_RE.fullmatch(name) or len(name) > 64:
+        out.append(_warning(path, "'name' should be lowercase letters, digits and dashes", "/name"))
+    if not meta.get("description", ""):
+        out.append(
+            _warning(
+                path,
+                f"frontmatter needs a 'description'; it tells the model when to use this {what}",
+                "/description",
+            )
+        )
+    if not body.strip():
+        out.append(_warning(path, f"this {what} has no instructions after the frontmatter"))
+    return out
+
+
+def validate_skill(path: str, content: bytes) -> list[Diagnostic]:
+    return _validate_named_markdown(path, content, "skill")
+
+
+def validate_subagent(path: str, content: bytes) -> list[Diagnostic]:
+    return _validate_named_markdown(path, content, "subagent")
+
+
+def validate_command(path: str, content: bytes) -> list[Diagnostic]:
+    try:
+        parse_frontmatter(content.decode("utf-8"))
+    except UnicodeDecodeError:
+        return [_error(path, "file is not valid UTF-8")]
+    except ValueError as e:
+        return [_warning(path, str(e))]
+    return []
+
+
+# "@path" imports in CLAUDE.md, outside code. Claude Code resolves them
+# relative to the importing file.
+_IMPORT_RE = re.compile(r"(?:^|\s)@([A-Za-z0-9_.][^\s`]*)")
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+
+def claude_md_imports(text: str) -> list[str]:
+    out: list[str] = []
+    fenced = False
+    for line in text.splitlines():
+        if _FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        line = re.sub(r"`[^`]*`", "", line)
+        out += [m.group(1).rstrip(".,;:)") for m in _IMPORT_RE.finditer(line)]
+    return out
+
+
+def validate_context_imports(path: str, content: bytes, paths: set[str]) -> list[Diagnostic]:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return [_error(path, "file is not valid UTF-8")]
+    out: list[Diagnostic] = []
+    for ref in claude_md_imports(text):
+        if ref.startswith("~") or ("/" not in ref and "." not in ref):
+            continue  # home-dir imports and plain @mentions are not checked
+        if ref.startswith(("/", "../")) or "/../" in ref:
+            out.append(_warning(path, f"@{ref} points outside the agent folder"))
+            continue
+        clean = ref.removeprefix("./")
+        if clean not in paths:
+            out.append(_warning(path, f"@{ref} imports a file that does not exist"))
+    return out
+
+
 _VALIDATORS = {
     MANIFEST_FILE: validate_manifest,
     SETTINGS_FILE: validate_settings,
@@ -121,10 +249,45 @@ _VALIDATORS = {
 }
 
 
+def wants_content(rel_path: str) -> bool:
+    """Whether folder validation needs this file's content."""
+    return (
+        rel_path in _VALIDATORS
+        or rel_path == CONTEXT_FILE
+        or bool(_SKILL_RE.match(rel_path) or _SUBAGENT_RE.match(rel_path))
+        or bool(_COMMAND_RE.match(rel_path))
+    )
+
+
 def validate_file(rel_path: str, content: bytes) -> list[Diagnostic]:
-    """Validate one file by its path relative to the agent root."""
+    """Validate one file by its path relative to the agent root (checks that
+    need the rest of the folder are in ``validate_folder``)."""
     validator = _VALIDATORS.get(rel_path)
-    return validator(content) if validator else []
+    if validator:
+        return validator(content)
+    if _SKILL_RE.match(rel_path):
+        return validate_skill(rel_path, content)
+    if _SUBAGENT_RE.match(rel_path):
+        return validate_subagent(rel_path, content)
+    if _COMMAND_RE.match(rel_path):
+        return validate_command(rel_path, content)
+    return []
+
+
+def validate_folder(files: Mapping[str, bytes], paths: set[str]) -> list[Diagnostic]:
+    """Validate a whole agent folder. ``files`` holds the content of every
+    file ``wants_content`` asked for; ``paths`` every path in the tree."""
+    diags: list[Diagnostic] = []
+    for path in sorted(files):
+        diags += validate_file(path, files[path])
+    context = files.get(CONTEXT_FILE)
+    if context is None:
+        diags.append(
+            _warning(CONTEXT_FILE, "CLAUDE.md is missing; the agent starts with no instructions")
+        )
+    else:
+        diags += validate_context_imports(CONTEXT_FILE, context, paths)
+    return diags
 
 
 def has_errors(diags: list[Diagnostic]) -> bool:

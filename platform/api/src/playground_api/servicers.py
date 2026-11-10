@@ -13,11 +13,13 @@ from playground_api import convert
 from playground_api.guard import current_principal, current_token
 from playground_core.errors import UnauthenticatedError
 from playground_core.events import Event
+from playground_core.models import Actor
 from playground_core.services.agents import AgentService
 from playground_core.services.auth import AuthService
 from playground_core.services.conversations import ConversationService
 from playground_core.services.credentials import CredentialService
 from playground_core.services.files import FileService
+from playground_core.services.history import HistoryService
 from playground_proto.platform.v1 import (
     agent_pb2,
     agent_pb2_grpc,
@@ -36,6 +38,11 @@ from playground_proto.platform.v1 import (
 Ctx = aio.ServicerContext[Any, Any]
 
 READ_CHUNK = 1024 * 1024
+
+
+def _actor() -> Actor:
+    principal = current_principal.get()
+    return Actor.user(principal.username if principal else "")
 
 
 class AuthServicer(auth_pb2_grpc.AuthServiceServicer):
@@ -87,7 +94,7 @@ class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
         self, request: agent_pb2.CreateAgentRequest, context: Ctx
     ) -> agent_pb2.CreateAgentResponse:
         record = await self._agents.create(
-            request.slug, request.name, request.description, request.template
+            request.slug, request.name, request.description, request.template, actor=_actor()
         )
         return agent_pb2.CreateAgentResponse(agent=convert.agent(record))
 
@@ -114,8 +121,9 @@ class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
 
 
 class FileServicer(file_pb2_grpc.FileServiceServicer):
-    def __init__(self, files: FileService) -> None:
+    def __init__(self, files: FileService, history: HistoryService) -> None:
         self._files = files
+        self._history = history
 
     async def GetTree(
         self, request: file_pb2.GetTreeRequest, context: Ctx
@@ -143,6 +151,7 @@ class FileServicer(file_pb2_grpc.FileServiceServicer):
             request.content,
             if_match=request.if_match,
             create_only=request.create_only,
+            actor=_actor(),
         )
         return file_pb2.WriteFileResponse(
             entry=convert.file_entry(out.result.entry),
@@ -153,13 +162,17 @@ class FileServicer(file_pb2_grpc.FileServiceServicer):
     async def DeleteFile(
         self, request: file_pb2.DeleteFileRequest, context: Ctx
     ) -> file_pb2.DeleteFileResponse:
-        await self._files.delete(request.slug, request.path, recursive=request.recursive)
+        await self._files.delete(
+            request.slug, request.path, recursive=request.recursive, actor=_actor()
+        )
         return file_pb2.DeleteFileResponse()
 
     async def MoveFile(
         self, request: file_pb2.MoveFileRequest, context: Ctx
     ) -> file_pb2.MoveFileResponse:
-        entry = await self._files.move(request.slug, request.from_path, request.to_path)
+        entry = await self._files.move(
+            request.slug, request.from_path, request.to_path, actor=_actor()
+        )
         return file_pb2.MoveFileResponse(entry=convert.file_entry(entry))
 
     async def CreateDirectory(
@@ -167,6 +180,24 @@ class FileServicer(file_pb2_grpc.FileServiceServicer):
     ) -> file_pb2.CreateDirectoryResponse:
         entry = await self._files.mkdir(request.slug, request.path)
         return file_pb2.CreateDirectoryResponse(entry=convert.file_entry(entry))
+
+    async def ListHistory(
+        self, request: file_pb2.ListHistoryRequest, context: Ctx
+    ) -> file_pb2.ListHistoryResponse:
+        commits = await self._history.log(request.slug, limit=request.limit, path=request.path)
+        return file_pb2.ListHistoryResponse(commits=[convert.commit(c) for c in commits])
+
+    async def DiffAgent(
+        self, request: file_pb2.DiffAgentRequest, context: Ctx
+    ) -> file_pb2.DiffAgentResponse:
+        changes = await self._history.diff(request.slug, request.from_commit, request.to_commit)
+        return file_pb2.DiffAgentResponse(changes=[convert.file_change(c) for c in changes])
+
+    async def RollbackAgent(
+        self, request: file_pb2.RollbackAgentRequest, context: Ctx
+    ) -> file_pb2.RollbackAgentResponse:
+        commit = await self._history.rollback(request.slug, request.commit, _actor(), request.path)
+        return file_pb2.RollbackAgentResponse(commit=convert.commit(commit))
 
 
 # -- Phase 2 ---------------------------------------------------------------------

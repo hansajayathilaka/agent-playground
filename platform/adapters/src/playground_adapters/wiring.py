@@ -16,6 +16,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from playground_adapters.fs_store import LocalAgentStore
+from playground_adapters.git_history import GitAgentHistory
 from playground_adapters.memory import (
     InMemoryAgentRepository,
     InMemoryControlChannel,
@@ -30,6 +31,7 @@ from playground_adapters.secrets import AesGcmSecretStore, parse_master_key
 from playground_adapters.templates import FsTemplateCatalog
 from playground_core.clock import SystemClock
 from playground_core.ports import (
+    AgentHistory,
     AgentRepository,
     AgentStore,
     Clock,
@@ -54,6 +56,10 @@ class InfraSettings(BaseSettings):
 
     agents_root: Path = Path("/data/agents")
     templates_root: Path = Path("agents/templates")
+    # The Builder (Phase 4): a system agent seeded from this folder when its
+    # folder is missing from agents_root.
+    builder_slug: str = "_builder"
+    builder_seed_dir: Path = Path("agents/_builder")
 
     # "memory" keeps everything in-process: tests and quick demos only. Runs
     # need a worker process sharing the same Redis, so use "redis" for them.
@@ -72,6 +78,7 @@ class InfraSettings(BaseSettings):
 class Infra:
     clock: Clock
     store: AgentStore
+    history: AgentHistory
     templates: TemplateCatalog
     agents: AgentRepository
     conversations: ConversationRepository
@@ -156,6 +163,7 @@ async def build_infra(settings: InfraSettings, stack: AsyncExitStack) -> Infra:
     return Infra(
         clock=SystemClock(),
         store=LocalAgentStore(settings.agents_root),
+        history=GitAgentHistory(settings.agents_root),
         templates=FsTemplateCatalog(settings.templates_root),
         agents=repos[0],
         conversations=repos[1],
@@ -167,3 +175,14 @@ async def build_infra(settings: InfraSettings, stack: AsyncExitStack) -> Infra:
         events=rt[2],
         control=rt[3],
     )
+
+
+def load_seed_folder(folder: Path) -> dict[str, bytes]:
+    """Files of a seed folder (relative path -> content), symlinks skipped."""
+    if not folder.is_dir():
+        return {}
+    return {
+        p.relative_to(folder).as_posix(): p.read_bytes()
+        for p in sorted(folder.rglob("*"))
+        if p.is_file() and not p.is_symlink()
+    }

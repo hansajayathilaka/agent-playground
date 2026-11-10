@@ -16,6 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
 from playground_adapters.fs_store import LocalAgentStore
+from playground_adapters.git_history import GitAgentHistory
 from playground_adapters.memory import (
     InMemoryAgentRepository,
     InMemoryControlChannel,
@@ -37,6 +38,7 @@ from playground_adapters.postgres import (
 from playground_adapters.redis_runs import RedisControlChannel, RedisEventLog, RedisJobQueue
 from playground_adapters.redis_sessions import RedisSessionStore
 from playground_core.ports import (
+    AgentHistory,
     AgentRepository,
     AgentStore,
     ControlChannel,
@@ -95,6 +97,11 @@ async def session_store(request: pytest.FixtureRequest) -> AsyncIterator[Session
 @pytest.fixture(params=["local-fs"])
 def agent_store(request: pytest.FixtureRequest, tmp_path: Path) -> AgentStore:
     return LocalAgentStore(tmp_path / "agents")
+
+
+@pytest.fixture(params=["git"])
+def agent_history(request: pytest.FixtureRequest, tmp_path: Path) -> AgentHistory:
+    return GitAgentHistory(tmp_path / "agents")
 
 
 async def _pg(request: pytest.FixtureRequest, pg_pool: Pool | None) -> Pool | None:

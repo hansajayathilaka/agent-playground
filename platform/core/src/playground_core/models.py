@@ -213,3 +213,68 @@ class CredentialSet:
     @property
     def has_secret(self) -> bool:
         return bool(self.secret_ciphertext)
+
+
+# -- agent history (Phase 4) ---------------------------------------------------
+
+
+class ActorKind(Enum):
+    USER = "user"  # a person, through the API
+    BUILDER = "builder"  # the Builder agent, through the platform MCP tools
+    AGENT = "agent"  # the agent's own run (memory/, workspace/)
+    PLATFORM = "platform"  # seeding, startup snapshots
+
+
+@dataclass(frozen=True, slots=True)
+class Actor:
+    """Who made a change; becomes the commit author and trailers."""
+
+    kind: ActorKind
+    name: str
+    run_id: str = ""
+
+    @staticmethod
+    def user(name: str) -> Actor:
+        return Actor(ActorKind.USER, name or "user")
+
+    @staticmethod
+    def builder(run_id: str) -> Actor:
+        return Actor(ActorKind.BUILDER, "Builder", run_id)
+
+    @staticmethod
+    def agent(slug: str, run_id: str) -> Actor:
+        return Actor(ActorKind.AGENT, slug, run_id)
+
+    @staticmethod
+    def platform() -> Actor:
+        return Actor(ActorKind.PLATFORM, "platform")
+
+
+@dataclass(frozen=True, slots=True)
+class Commit:
+    id: str  # full hex object id
+    message: str  # subject line
+    author: str
+    actor: ActorKind
+    time: datetime
+    run_id: str = ""
+
+
+class ChangeKind(Enum):
+    ADDED = "added"
+    MODIFIED = "modified"
+    DELETED = "deleted"
+    RENAMED = "renamed"
+
+
+@dataclass(frozen=True, slots=True)
+class FileChange:
+    path: str
+    change: ChangeKind
+    old_path: str = ""  # set for renames
+    binary: bool = False
+    additions: int = 0
+    deletions: int = 0
+    # Unified diff of this file; empty for binary files. May be cut short.
+    patch: str = ""
+    truncated: bool = False

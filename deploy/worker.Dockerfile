@@ -20,6 +20,7 @@ RUN uv sync --frozen --no-dev --no-install-workspace --package playground-worker
 
 COPY platform platform
 COPY agents/templates agents/templates
+COPY agents/_builder agents/_builder
 RUN uv sync --frozen --no-dev --package playground-worker --no-editable
 
 # Agents run in a bubblewrap jail (platform/worker/.../jail.py), which needs
@@ -34,6 +35,7 @@ ENV PATH=/opt/venv/bin:$PATH \
     AGENTS_ROOT=/data/agents \
     SESSIONS_ROOT=/data/sessions \
     TEMPLATES_ROOT=/app/agents/templates \
+    BUILDER_SEED_DIR=/app/agents/_builder \
     RUN_RUNTIME_DIR=/run/playground
 ENTRYPOINT ["/usr/local/bin/worker-entrypoint"]
 CMD ["playground-worker"]

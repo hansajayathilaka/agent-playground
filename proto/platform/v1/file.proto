@@ -18,6 +18,17 @@ service FileService {
   rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
   rpc MoveFile(MoveFileRequest) returns (MoveFileResponse);
   rpc CreateDirectory(CreateDirectoryRequest) returns (CreateDirectoryResponse);
+
+  // Version history of the agent folder (state/ is never part of it). Every
+  // change made through the platform is a commit: file edits, the Builder's
+  // writes and what each run changed in memory/ and workspace/.
+  rpc ListHistory(ListHistoryRequest) returns (ListHistoryResponse);
+  // Changes between two commits; see DiffAgentRequest for the defaults.
+  rpc DiffAgent(DiffAgentRequest) returns (DiffAgentResponse);
+  // Restores the folder, or one path, to an earlier commit and records that
+  // as a new commit, so a rollback can itself be undone. Fails with
+  // FAILED_PRECONDITION while the agent is running.
+  rpc RollbackAgent(RollbackAgentRequest) returns (RollbackAgentResponse);
 }
 
 message FileEntry {
@@ -102,4 +113,85 @@ message CreateDirectoryRequest {
 
 message CreateDirectoryResponse {
   FileEntry entry = 1;
+}
+
+message Commit {
+  enum Actor {
+    ACTOR_UNSPECIFIED = 0;
+    // A person, through the API.
+    ACTOR_USER = 1;
+    // The Builder agent, through its platform tools.
+    ACTOR_BUILDER = 2;
+    // The agent's own run (memory/ and workspace/).
+    ACTOR_AGENT = 3;
+    // The platform itself: seeding, startup snapshots.
+    ACTOR_PLATFORM = 4;
+  }
+  // Full hex object id.
+  string id = 1;
+  // Subject line.
+  string message = 2;
+  string author = 3;
+  Actor actor = 4;
+  google.protobuf.Timestamp time = 5;
+  // The run that made the change (Builder and agent commits).
+  string run_id = 6;
+}
+
+message FileChange {
+  enum Change {
+    CHANGE_UNSPECIFIED = 0;
+    CHANGE_ADDED = 1;
+    CHANGE_MODIFIED = 2;
+    CHANGE_DELETED = 3;
+    CHANGE_RENAMED = 4;
+  }
+  string path = 1;
+  Change change = 2;
+  // Set for renames.
+  string old_path = 3;
+  bool binary = 4;
+  int32 additions = 5;
+  int32 deletions = 6;
+  // Unified diff of this file; empty for binary files.
+  string patch = 7;
+  // The patch was cut short (very large change).
+  bool truncated = 8;
+}
+
+message ListHistoryRequest {
+  string slug = 1;
+  // Defaults to 100, at most 500.
+  int32 limit = 2;
+  // Only commits that touched this path.
+  string path = 3;
+}
+
+message ListHistoryResponse {
+  // Newest first.
+  repeated Commit commits = 1;
+}
+
+message DiffAgentRequest {
+  string slug = 1;
+  // Older side. Empty: the parent of to_commit (nothing, for the first commit).
+  string from_commit = 2;
+  // Newer side. Empty: the latest commit.
+  string to_commit = 3;
+}
+
+message DiffAgentResponse {
+  repeated FileChange changes = 1;
+}
+
+message RollbackAgentRequest {
+  string slug = 1;
+  string commit = 2;
+  // Restore only this file or folder; empty restores the whole folder.
+  string path = 3;
+}
+
+message RollbackAgentResponse {
+  // The new commit that records the rollback.
+  Commit commit = 1;
 }

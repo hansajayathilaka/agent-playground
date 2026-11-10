@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["mcp__platform", "Read", "Glob", "Grep"],
+    "deny": []
+  }
+}

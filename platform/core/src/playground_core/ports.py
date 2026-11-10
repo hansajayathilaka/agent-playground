@@ -15,10 +15,13 @@ from typing import Any, Protocol
 
 from playground_core.events import Event, EventKind
 from playground_core.models import (
+    Actor,
     AgentRecord,
+    Commit,
     ControlMessage,
     Conversation,
     CredentialSet,
+    FileChange,
     FileContent,
     FileEntry,
     Job,
@@ -156,6 +159,17 @@ class JobQueue(Protocol):
         agents were woken. Safe to call from every worker periodically."""
         ...
 
+    async def lock(self, agent_slug: str, ttl: timedelta) -> str | None:
+        """Take the agent lock without a job, for edits that must not overlap
+        a run (Builder writes, rollbacks). Returns a token, or None when the
+        agent is busy. Queued jobs wait until ``unlock``."""
+        ...
+
+    async def unlock(self, agent_slug: str, token: str) -> None:
+        """Release a lock taken with ``lock`` and make the agent's next job
+        claimable. No-op if the token no longer holds the lock."""
+        ...
+
 
 class EventLog(Protocol):
     """Append-only event stream per conversation, replayable by offset."""
@@ -275,6 +289,34 @@ class SecretStore(Protocol):
         ...
 
     def decrypt(self, ciphertext: bytes, *, context: str) -> bytes: ...
+
+
+# -- Phase 4: agent history -------------------------------------------------------
+
+
+class AgentHistory(Protocol):
+    """Version history of each agent folder (v1: a git repository in the
+    folder's ``.git/``). ``state/`` is never part of the history."""
+
+    async def commit(self, slug: str, message: str, actor: Actor) -> Commit | None:
+        """Snapshot the whole folder. Starts the history if there is none.
+        Returns None when nothing changed since the last commit."""
+        ...
+
+    async def log(self, slug: str, *, limit: int, path: str = "") -> Sequence[Commit]:
+        """Newest first; only commits touching ``path`` when given."""
+        ...
+
+    async def diff(self, slug: str, from_commit: str, to_commit: str) -> Sequence[FileChange]:
+        """Changes from ``from_commit`` to ``to_commit``. Empty ``to_commit``
+        is the latest commit; empty ``from_commit`` is ``to_commit``'s parent
+        (or nothing, for the first commit). NotFoundError for unknown ids."""
+        ...
+
+    async def restore(self, slug: str, commit_id: str, path: str = "") -> None:
+        """Make the folder (or just ``path``) match ``commit_id``: changed
+        files are rewritten, files added since are removed. Does not commit."""
+        ...
 
 
 # -- AgentRunner -----------------------------------------------------------------

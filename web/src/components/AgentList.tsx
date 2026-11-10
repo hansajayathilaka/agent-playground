@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
 import type { Agent } from "../gen/platform/v1/agent_pb.js";
 import { agentClient, errorMessage } from "../lib/api.js";
-import { NewAgentForm } from "./NewAgentForm.js";
+import { BUILDER_SLUG, NewAgentForm } from "./NewAgentForm.js";
 
 interface Props {
   selected: string | null;
   onSelect: (slug: string) => void;
+  onOpenConversation: (slug: string, conversationId: string) => void;
   version: number;
   onChanged: () => void;
 }
 
-export function AgentList({ selected, onSelect, version, onChanged }: Props) {
+export function AgentList({ selected, onSelect, onOpenConversation, version, onChanged }: Props) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: version is a refresh trigger
+  // biome-ignore lint/correctness/useExhaustiveDependencies: version and selected are refresh triggers (the Builder may have added agents)
   useEffect(() => {
     agentClient
       .listAgents({})
@@ -24,7 +25,7 @@ export function AgentList({ selected, onSelect, version, onChanged }: Props) {
         setError("");
       })
       .catch((err: unknown) => setError(errorMessage(err)));
-  }, [version]);
+  }, [version, selected]);
 
   return (
     <nav className="sidebar">
@@ -41,6 +42,14 @@ export function AgentList({ selected, onSelect, version, onChanged }: Props) {
             onChanged();
             onSelect(slug);
           }}
+          onBuilderStarted={
+            agents.some((a) => a.slug === BUILDER_SLUG)
+              ? (conversationId) => {
+                  setCreating(false);
+                  onOpenConversation(BUILDER_SLUG, conversationId);
+                }
+              : null
+          }
         />
       )}
       {error && <p className="error">{error}</p>}

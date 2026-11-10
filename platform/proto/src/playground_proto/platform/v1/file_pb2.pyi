@@ -355,3 +355,274 @@ class CreateDirectoryResponse(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___CreateDirectoryResponse: _TypeAlias = CreateDirectoryResponse  # noqa: Y015
+
+@_typing.final
+class Commit(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    class _Actor:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _ActorEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[Commit._Actor.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        ACTOR_UNSPECIFIED: Commit._Actor.ValueType  # 0
+        ACTOR_USER: Commit._Actor.ValueType  # 1
+        """A person, through the API."""
+        ACTOR_BUILDER: Commit._Actor.ValueType  # 2
+        """The Builder agent, through its platform tools."""
+        ACTOR_AGENT: Commit._Actor.ValueType  # 3
+        """The agent's own run (memory/ and workspace/)."""
+        ACTOR_PLATFORM: Commit._Actor.ValueType  # 4
+        """The platform itself: seeding, startup snapshots."""
+
+    class Actor(_Actor, metaclass=_ActorEnumTypeWrapper): ...
+    ACTOR_UNSPECIFIED: Commit.Actor.ValueType  # 0
+    ACTOR_USER: Commit.Actor.ValueType  # 1
+    """A person, through the API."""
+    ACTOR_BUILDER: Commit.Actor.ValueType  # 2
+    """The Builder agent, through its platform tools."""
+    ACTOR_AGENT: Commit.Actor.ValueType  # 3
+    """The agent's own run (memory/ and workspace/)."""
+    ACTOR_PLATFORM: Commit.Actor.ValueType  # 4
+    """The platform itself: seeding, startup snapshots."""
+
+    ID_FIELD_NUMBER: _builtins.int
+    MESSAGE_FIELD_NUMBER: _builtins.int
+    AUTHOR_FIELD_NUMBER: _builtins.int
+    ACTOR_FIELD_NUMBER: _builtins.int
+    TIME_FIELD_NUMBER: _builtins.int
+    RUN_ID_FIELD_NUMBER: _builtins.int
+    id: _builtins.str
+    """Full hex object id."""
+    message: _builtins.str
+    """Subject line."""
+    author: _builtins.str
+    actor: Global___Commit.Actor.ValueType
+    run_id: _builtins.str
+    """The run that made the change (Builder and agent commits)."""
+    @_builtins.property
+    def time(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        id: _builtins.str = ...,
+        message: _builtins.str = ...,
+        author: _builtins.str = ...,
+        actor: Global___Commit.Actor.ValueType = ...,
+        time: _timestamp_pb2.Timestamp | None = ...,
+        run_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["time", b"time"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["actor", b"actor", "author", b"author", "id", b"id", "message", b"message", "run_id", b"run_id", "time", b"time"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___Commit: _TypeAlias = Commit  # noqa: Y015
+
+@_typing.final
+class FileChange(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    class _Change:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _ChangeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[FileChange._Change.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        CHANGE_UNSPECIFIED: FileChange._Change.ValueType  # 0
+        CHANGE_ADDED: FileChange._Change.ValueType  # 1
+        CHANGE_MODIFIED: FileChange._Change.ValueType  # 2
+        CHANGE_DELETED: FileChange._Change.ValueType  # 3
+        CHANGE_RENAMED: FileChange._Change.ValueType  # 4
+
+    class Change(_Change, metaclass=_ChangeEnumTypeWrapper): ...
+    CHANGE_UNSPECIFIED: FileChange.Change.ValueType  # 0
+    CHANGE_ADDED: FileChange.Change.ValueType  # 1
+    CHANGE_MODIFIED: FileChange.Change.ValueType  # 2
+    CHANGE_DELETED: FileChange.Change.ValueType  # 3
+    CHANGE_RENAMED: FileChange.Change.ValueType  # 4
+
+    PATH_FIELD_NUMBER: _builtins.int
+    CHANGE_FIELD_NUMBER: _builtins.int
+    OLD_PATH_FIELD_NUMBER: _builtins.int
+    BINARY_FIELD_NUMBER: _builtins.int
+    ADDITIONS_FIELD_NUMBER: _builtins.int
+    DELETIONS_FIELD_NUMBER: _builtins.int
+    PATCH_FIELD_NUMBER: _builtins.int
+    TRUNCATED_FIELD_NUMBER: _builtins.int
+    path: _builtins.str
+    change: Global___FileChange.Change.ValueType
+    old_path: _builtins.str
+    """Set for renames."""
+    binary: _builtins.bool
+    additions: _builtins.int
+    deletions: _builtins.int
+    patch: _builtins.str
+    """Unified diff of this file; empty for binary files."""
+    truncated: _builtins.bool
+    """The patch was cut short (very large change)."""
+    def __init__(
+        self,
+        *,
+        path: _builtins.str = ...,
+        change: Global___FileChange.Change.ValueType = ...,
+        old_path: _builtins.str = ...,
+        binary: _builtins.bool = ...,
+        additions: _builtins.int = ...,
+        deletions: _builtins.int = ...,
+        patch: _builtins.str = ...,
+        truncated: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["additions", b"additions", "binary", b"binary", "change", b"change", "deletions", b"deletions", "old_path", b"old_path", "patch", b"patch", "path", b"path", "truncated", b"truncated"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___FileChange: _TypeAlias = FileChange  # noqa: Y015
+
+@_typing.final
+class ListHistoryRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SLUG_FIELD_NUMBER: _builtins.int
+    LIMIT_FIELD_NUMBER: _builtins.int
+    PATH_FIELD_NUMBER: _builtins.int
+    slug: _builtins.str
+    limit: _builtins.int
+    """Defaults to 100, at most 500."""
+    path: _builtins.str
+    """Only commits that touched this path."""
+    def __init__(
+        self,
+        *,
+        slug: _builtins.str = ...,
+        limit: _builtins.int = ...,
+        path: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["limit", b"limit", "path", b"path", "slug", b"slug"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ListHistoryRequest: _TypeAlias = ListHistoryRequest  # noqa: Y015
+
+@_typing.final
+class ListHistoryResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    COMMITS_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def commits(self) -> _containers.RepeatedCompositeFieldContainer[Global___Commit]:
+        """Newest first."""
+
+    def __init__(
+        self,
+        *,
+        commits: _abc.Iterable[Global___Commit] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["commits", b"commits"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ListHistoryResponse: _TypeAlias = ListHistoryResponse  # noqa: Y015
+
+@_typing.final
+class DiffAgentRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SLUG_FIELD_NUMBER: _builtins.int
+    FROM_COMMIT_FIELD_NUMBER: _builtins.int
+    TO_COMMIT_FIELD_NUMBER: _builtins.int
+    slug: _builtins.str
+    from_commit: _builtins.str
+    """Older side. Empty: the parent of to_commit (nothing, for the first commit)."""
+    to_commit: _builtins.str
+    """Newer side. Empty: the latest commit."""
+    def __init__(
+        self,
+        *,
+        slug: _builtins.str = ...,
+        from_commit: _builtins.str = ...,
+        to_commit: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["from_commit", b"from_commit", "slug", b"slug", "to_commit", b"to_commit"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DiffAgentRequest: _TypeAlias = DiffAgentRequest  # noqa: Y015
+
+@_typing.final
+class DiffAgentResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    CHANGES_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def changes(self) -> _containers.RepeatedCompositeFieldContainer[Global___FileChange]: ...
+    def __init__(
+        self,
+        *,
+        changes: _abc.Iterable[Global___FileChange] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["changes", b"changes"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DiffAgentResponse: _TypeAlias = DiffAgentResponse  # noqa: Y015
+
+@_typing.final
+class RollbackAgentRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SLUG_FIELD_NUMBER: _builtins.int
+    COMMIT_FIELD_NUMBER: _builtins.int
+    PATH_FIELD_NUMBER: _builtins.int
+    slug: _builtins.str
+    commit: _builtins.str
+    path: _builtins.str
+    """Restore only this file or folder; empty restores the whole folder."""
+    def __init__(
+        self,
+        *,
+        slug: _builtins.str = ...,
+        commit: _builtins.str = ...,
+        path: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["commit", b"commit", "path", b"path", "slug", b"slug"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RollbackAgentRequest: _TypeAlias = RollbackAgentRequest  # noqa: Y015
+
+@_typing.final
+class RollbackAgentResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    COMMIT_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def commit(self) -> Global___Commit:
+        """The new commit that records the rollback."""
+
+    def __init__(
+        self,
+        *,
+        commit: Global___Commit | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["commit", b"commit"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["commit", b"commit"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RollbackAgentResponse: _TypeAlias = RollbackAgentResponse  # noqa: Y015

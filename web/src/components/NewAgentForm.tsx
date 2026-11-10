@@ -1,6 +1,12 @@
 import { type FormEvent, useEffect, useState } from "react";
 import type { Template } from "../gen/platform/v1/agent_pb.js";
-import { agentClient, errorMessage } from "../lib/api.js";
+import { agentClient, errorMessage, runClient } from "../lib/api.js";
+
+export const BUILDER_SLUG = "_builder";
+
+export function builderPrompt(description: string): string {
+  return `Create a new agent: ${description.trim()}`;
+}
 
 export function slugify(name: string): string {
   return name
@@ -10,7 +16,18 @@ export function slugify(name: string): string {
     .slice(0, 50);
 }
 
-export function NewAgentForm({ onCreated }: { onCreated: (slug: string) => void }) {
+interface Props {
+  onCreated: (slug: string) => void;
+  // Set when the Builder agent exists: the form can hand it a description.
+  onBuilderStarted: ((conversationId: string) => void) | null;
+}
+
+export function NewAgentForm({ onCreated, onBuilderStarted }: Props) {
+  const [mode, setMode] = useState<"builder" | "template">(
+    onBuilderStarted ? "builder" : "template",
+  );
+  const [idea, setIdea] = useState("");
+  const [busy, setBusy] = useState(false);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -36,8 +53,67 @@ export function NewAgentForm({ onCreated }: { onCreated: (slug: string) => void 
     }
   };
 
+  const askBuilder = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!onBuilderStarted) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await runClient.startRun({ agentSlug: BUILDER_SLUG, prompt: builderPrompt(idea) });
+      if (r.conversation) onBuilderStarted(r.conversation.id);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switcher = onBuilderStarted && (
+    <div className="tabs" role="tablist">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "builder"}
+        className={mode === "builder" ? "tab active" : "tab"}
+        onClick={() => setMode("builder")}
+      >
+        Describe it
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "template"}
+        className={mode === "template" ? "tab active" : "tab"}
+        onClick={() => setMode("template")}
+      >
+        From a template
+      </button>
+    </div>
+  );
+
+  if (mode === "builder" && onBuilderStarted) {
+    return (
+      <form className="new-agent" onSubmit={askBuilder}>
+        {switcher}
+        <textarea
+          placeholder="What should the agent do? One line is enough, for example: summarise new GitHub issues every morning"
+          value={idea}
+          onChange={(e) => setIdea(e.target.value)}
+          rows={4}
+          required
+        />
+        {error && <p className="error">{error}</p>}
+        <button type="submit" className="primary" disabled={busy || !idea.trim()}>
+          Ask the Builder
+        </button>
+        <small className="muted">The Builder creates the agent, tests it and reports back.</small>
+      </form>
+    );
+  }
+
   return (
     <form className="new-agent" onSubmit={submit}>
+      {switcher}
       <input
         placeholder="Name"
         value={name}

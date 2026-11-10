@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from playground_adapters.fs_store import LocalAgentStore
+from playground_adapters.git_history import GitAgentHistory
 from playground_adapters.memory import (
     InMemoryAgentRepository,
     InMemoryControlChannel,
@@ -112,6 +113,7 @@ def memory_infra(agents_root: Path) -> Infra:
     return Infra(
         clock=SystemClock(),
         store=LocalAgentStore(agents_root),
+        history=GitAgentHistory(agents_root),
         templates=FsTemplateCatalog(TEMPLATES),
         agents=InMemoryAgentRepository(),
         conversations=InMemoryConversationRepository(),
@@ -126,7 +128,7 @@ def memory_infra(agents_root: Path) -> Infra:
 
 
 def make_platform(infra: Infra, runner: FakeRunner, concurrency: int = 2) -> Platform:
-    agents = AgentService(infra.store, infra.agents, infra.templates, infra.clock)
+    agents = AgentService(infra.store, infra.agents, infra.templates, infra.clock, infra.history)
     credentials = CredentialService(infra.credentials, infra.secrets, infra.store, infra.clock)
     conversations = ConversationService(
         infra.conversations,

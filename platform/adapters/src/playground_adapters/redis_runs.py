@@ -96,6 +96,18 @@ return n
 """
 
 
+# Edit lock: same key as a run's lease, so edits and runs exclude each other.
+_UNLOCK = """
+local lock, active, pending, agents, wake = KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5]
+if redis.call('GET', lock) ~= ARGV[1] then return 0 end
+redis.call('DEL', lock)
+if redis.call('LLEN', pending) > 0 or redis.call('EXISTS', active) == 1 then
+  redis.call('XADD', wake, 'MAXLEN', '~', '10000', '*', 'slug', ARGV[2])
+end
+return 1
+"""
+
+
 def _s(value: bytes | str) -> str:
     return value.decode() if isinstance(value, bytes) else value
 
@@ -121,6 +133,7 @@ class RedisJobQueue:
         self._renew = client.register_script(_RENEW)
         self._complete = client.register_script(_COMPLETE)
         self._recover = client.register_script(_RECOVER)
+        self._unlock = client.register_script(_UNLOCK)
 
     def _keys(self, slug: str) -> list[str]:
         p = self._p
@@ -194,6 +207,16 @@ class RedisJobQueue:
     async def recover(self) -> int:
         await self._ensure_group()
         return int(await self._recover(keys=[self._agents, self._wake], args=[self._p]))
+
+    async def lock(self, agent_slug: str, ttl: timedelta) -> str | None:
+        token = secrets.token_hex(16)
+        ms = max(1, int(ttl.total_seconds() * 1000))
+        ok = await self._r.set(self._p + "lock:" + agent_slug, token, nx=True, px=ms)
+        return token if ok else None
+
+    async def unlock(self, agent_slug: str, token: str) -> None:
+        keys = [*self._keys(agent_slug), self._wake]
+        await self._unlock(keys=keys, args=[token, agent_slug])
 
 
 # -- EventLog --------------------------------------------------------------------

@@ -16,6 +16,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       AGENTS_ROOT: /data/agents
       TEMPLATES_ROOT: /workspace/agents/templates
+      BUILDER_SEED_DIR: /workspace/agents/_builder
       ADMIN_PASSWORD: dev
       # Dev-only key (32 zero bytes, base64). Never use it for real secrets.
       SECRETS_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

@@ -67,6 +67,21 @@ class FileServiceStub:
                 request_serializer=platform_dot_v1_dot_file__pb2.CreateDirectoryRequest.SerializeToString,
                 response_deserializer=platform_dot_v1_dot_file__pb2.CreateDirectoryResponse.FromString,
                 _registered_method=True)
+        self.ListHistory = channel.unary_unary(
+                '/platform.v1.FileService/ListHistory',
+                request_serializer=platform_dot_v1_dot_file__pb2.ListHistoryRequest.SerializeToString,
+                response_deserializer=platform_dot_v1_dot_file__pb2.ListHistoryResponse.FromString,
+                _registered_method=True)
+        self.DiffAgent = channel.unary_unary(
+                '/platform.v1.FileService/DiffAgent',
+                request_serializer=platform_dot_v1_dot_file__pb2.DiffAgentRequest.SerializeToString,
+                response_deserializer=platform_dot_v1_dot_file__pb2.DiffAgentResponse.FromString,
+                _registered_method=True)
+        self.RollbackAgent = channel.unary_unary(
+                '/platform.v1.FileService/RollbackAgent',
+                request_serializer=platform_dot_v1_dot_file__pb2.RollbackAgentRequest.SerializeToString,
+                response_deserializer=platform_dot_v1_dot_file__pb2.RollbackAgentResponse.FromString,
+                _registered_method=True)
 
 
 class FileServiceServicer:
@@ -114,6 +129,31 @@ class FileServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListHistory(self, request, context):
+        """Version history of the agent folder (state/ is never part of it). Every
+        change made through the platform is a commit: file edits, the Builder's
+        writes and what each run changed in memory/ and workspace/.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DiffAgent(self, request, context):
+        """Changes between two commits; see DiffAgentRequest for the defaults.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RollbackAgent(self, request, context):
+        """Restores the folder, or one path, to an earlier commit and records that
+        as a new commit, so a rollback can itself be undone. Fails with
+        FAILED_PRECONDITION while the agent is running.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_FileServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -146,6 +186,21 @@ def add_FileServiceServicer_to_server(servicer, server):
                     servicer.CreateDirectory,
                     request_deserializer=platform_dot_v1_dot_file__pb2.CreateDirectoryRequest.FromString,
                     response_serializer=platform_dot_v1_dot_file__pb2.CreateDirectoryResponse.SerializeToString,
+            ),
+            'ListHistory': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListHistory,
+                    request_deserializer=platform_dot_v1_dot_file__pb2.ListHistoryRequest.FromString,
+                    response_serializer=platform_dot_v1_dot_file__pb2.ListHistoryResponse.SerializeToString,
+            ),
+            'DiffAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.DiffAgent,
+                    request_deserializer=platform_dot_v1_dot_file__pb2.DiffAgentRequest.FromString,
+                    response_serializer=platform_dot_v1_dot_file__pb2.DiffAgentResponse.SerializeToString,
+            ),
+            'RollbackAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.RollbackAgent,
+                    request_deserializer=platform_dot_v1_dot_file__pb2.RollbackAgentRequest.FromString,
+                    response_serializer=platform_dot_v1_dot_file__pb2.RollbackAgentResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -313,6 +368,87 @@ class FileService:
             '/platform.v1.FileService/CreateDirectory',
             platform_dot_v1_dot_file__pb2.CreateDirectoryRequest.SerializeToString,
             platform_dot_v1_dot_file__pb2.CreateDirectoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListHistory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/platform.v1.FileService/ListHistory',
+            platform_dot_v1_dot_file__pb2.ListHistoryRequest.SerializeToString,
+            platform_dot_v1_dot_file__pb2.ListHistoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DiffAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/platform.v1.FileService/DiffAgent',
+            platform_dot_v1_dot_file__pb2.DiffAgentRequest.SerializeToString,
+            platform_dot_v1_dot_file__pb2.DiffAgentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RollbackAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/platform.v1.FileService/RollbackAgent',
+            platform_dot_v1_dot_file__pb2.RollbackAgentRequest.SerializeToString,
+            platform_dot_v1_dot_file__pb2.RollbackAgentResponse.FromString,
             options,
             channel_credentials,
             insecure,

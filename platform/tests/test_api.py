@@ -141,7 +141,8 @@ async def test_create_and_edit_agent(client: Client) -> None:
     ) == (grpc.StatusCode.ALREADY_EXISTS)
 
     listed = await client.agents.ListAgents(agent_pb2.ListAgentsRequest(), metadata=md)
-    assert [a.slug for a in listed.agents] == ["helper"]
+    # The Builder is seeded at startup as a system agent.
+    assert [a.slug for a in listed.agents] == ["_builder", "helper"]
 
     tree = await client.files.GetTree(file_pb2.GetTreeRequest(slug="helper"), metadata=md)
     assert "CLAUDE.md" in {e.path for e in tree.entries}
@@ -351,3 +352,51 @@ async def test_cancel_and_heartbeats(client: Client) -> None:
             event_pb2.WatchEventsRequest(conversation_id="nope"), metadata=md
         ).read()
     ) == (grpc.StatusCode.NOT_FOUND)
+
+
+async def test_history_diff_and_rollback(client: Client) -> None:
+    await client.login()
+    md = client.md
+    await client.agents.CreateAgent(
+        agent_pb2.CreateAgentRequest(slug="hist", name="Hist"), metadata=md
+    )
+    write = file_pb2.WriteFileRequest(slug="hist", path="CLAUDE.md", content=b"# v2\n")
+    await client.files.WriteFile(write, metadata=md)
+    history = await client.files.ListHistory(file_pb2.ListHistoryRequest(slug="hist"), metadata=md)
+    assert [c.message for c in history.commits] == [
+        "Update CLAUDE.md",
+        "Create agent from template 'blank'",
+    ]
+    latest, created = history.commits
+    assert latest.author == ADMIN_USER and latest.actor == file_pb2.Commit.ACTOR_USER
+
+    diff = await client.files.DiffAgent(file_pb2.DiffAgentRequest(slug="hist"), metadata=md)
+    assert [(c.path, c.change) for c in diff.changes] == [
+        ("CLAUDE.md", file_pb2.FileChange.CHANGE_MODIFIED)
+    ]
+    assert "+# v2" in diff.changes[0].patch
+
+    back = await client.files.RollbackAgent(
+        file_pb2.RollbackAgentRequest(slug="hist", commit=created.id), metadata=md
+    )
+    assert back.commit.message.startswith("Roll back to ")
+    read = client.files.ReadFile(
+        file_pb2.ReadFileRequest(slug="hist", path="CLAUDE.md"), metadata=md
+    )
+    content = b"".join([m.chunk async for m in read])
+    assert b"# v2" not in content
+
+    assert await _code(
+        client.files.DiffAgent(
+            file_pb2.DiffAgentRequest(slug="hist", from_commit="--output=/tmp/x"), metadata=md
+        )
+    ) == (grpc.StatusCode.INVALID_ARGUMENT)
+    assert await _code(
+        client.files.RollbackAgent(
+            file_pb2.RollbackAgentRequest(slug="hist", commit="0" * 40), metadata=md
+        )
+    ) == (grpc.StatusCode.NOT_FOUND)
+    # System agents can't be deleted.
+    assert await _code(
+        client.agents.DeleteAgent(agent_pb2.DeleteAgentRequest(slug="_builder"), metadata=md)
+    ) == (grpc.StatusCode.PERMISSION_DENIED)

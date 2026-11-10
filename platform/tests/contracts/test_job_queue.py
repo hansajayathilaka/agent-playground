@@ -93,3 +93,30 @@ async def test_claim_wakes_on_enqueue(job_queue: JobQueue) -> None:
     await job_queue.enqueue(Job("r1", "alpha"))
     lease = await asyncio.wait_for(waiter, 2)
     assert lease is not None and lease.job.run_id == "r1"
+
+
+async def test_edit_lock_excludes_runs_and_wakes_waiting_jobs(job_queue: JobQueue) -> None:
+    token = await job_queue.lock("alpha", TTL * 4)
+    assert token is not None
+    assert await job_queue.lock("alpha", TTL) is None  # one holder at a time
+    await job_queue.enqueue(Job("r1", "alpha"))
+    assert await job_queue.claim("w1", 0.2) is None  # the edit holds the agent
+    await job_queue.unlock("alpha", "not-the-token")  # ignored
+    assert await job_queue.claim("w1", 0.2) is None
+    await job_queue.unlock("alpha", token)
+    lease = await job_queue.claim("w1", 1)
+    assert lease is not None and lease.job.run_id == "r1" and not lease.recovered
+    assert await job_queue.lock("alpha", TTL) is None  # a run holds it now
+    await job_queue.complete(lease)
+    again = await job_queue.lock("alpha", TTL)
+    assert again is not None
+    await job_queue.unlock("alpha", again)
+
+
+async def test_edit_lock_expires(job_queue: JobQueue) -> None:
+    assert await job_queue.lock("alpha", TTL) is not None
+    await job_queue.enqueue(Job("r1", "alpha"))
+    await asyncio.sleep(0.7)  # the editor died holding the lock
+    await job_queue.recover()
+    lease = await job_queue.claim("w1", 1)
+    assert lease is not None and lease.job.run_id == "r1"

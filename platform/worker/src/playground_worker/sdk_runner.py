@@ -16,7 +16,7 @@ import logging
 import os
 import shutil
 import sys
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,7 +39,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
     UserMessage,
 )
-from claude_agent_sdk.types import ServerToolResultBlock, ServerToolUseBlock
+from claude_agent_sdk.types import McpServerConfig, ServerToolResultBlock, ServerToolUseBlock
 
 from playground_core.events import EventKind
 from playground_core.models import RunStatus, RunUsage
@@ -282,6 +282,10 @@ NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
 CA_VARS = ("SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
 
 
+# In-process MCP servers the platform adds to a run (the Builder's tools).
+PlatformTools = Callable[[RunRequest], Mapping[str, McpServerConfig]]
+
+
 class ClaudeAgentRunner:
     def __init__(
         self,
@@ -289,6 +293,7 @@ class ClaudeAgentRunner:
         sessions_root: Path,
         passthrough: list[str],
         sandbox: SandboxSettings | None = None,
+        platform_tools: PlatformTools | None = None,
     ) -> None:
         self._agents_root = agents_root
         self._sessions_root = sessions_root
@@ -297,6 +302,7 @@ class ClaudeAgentRunner:
         self._launcher = launcher_path()
         self._sandbox = sandbox or SandboxSettings()
         self._cgroups = RunCgroups(self._sandbox.cgroup_root)
+        self._platform_tools = platform_tools
         if self._sandbox.mode == "bwrap" and not self._cgroups.available:
             log.warning("per-run memory/CPU/process limits are off: %s", self._cgroups.reason)
 
@@ -397,6 +403,7 @@ class ClaudeAgentRunner:
                 for name in NO_PROXY_VARS:
                     env[name] = ""
         builder_root = self._agents_root if self._is_builder(request) else None
+        servers = dict(self._platform_tools(request)) if self._platform_tools else {}
         return ClaudeAgentOptions(
             cwd=str(agent_dir),
             cli_path=self._launcher,
@@ -407,6 +414,7 @@ class ClaudeAgentRunner:
             max_turns=request.max_turns,
             max_budget_usd=request.max_budget_usd,
             resume=request.resume_session_id or None,
+            mcp_servers=servers,
             include_partial_messages=True,
             permission_mode="default",
             can_use_tool=_allow_all,

@@ -11,8 +11,9 @@ import pytest
 
 from playground_core.errors import FailedPreconditionError, InvalidArgumentError, NotFoundError
 from playground_core.events import EventKind
-from playground_core.models import Job, RunStatus
+from playground_core.models import ActorKind, Job, RunStatus
 from playground_core.ports import RunChanges
+from playground_core.services.history import edit_lock
 
 from .runs_harness import (
     FakeRunner,
@@ -233,3 +234,47 @@ async def test_watch_replays_and_follows(platform: Platform) -> None:
     async with running(p.worker):
         await asyncio.wait_for(watch(), 5)
     assert got[0] == 2 and got == list(range(2, len(got) + 2))
+
+
+async def test_run_changes_are_recorded_as_the_agent(platform: Platform, agents_root: Path) -> None:
+    p = platform
+    await add_default_credentials(p.credentials)
+    _, run = await p.conversations.start_run("alpha", "wait and write")
+    async with running(p.worker):
+        await asyncio.wait_for(p.runner.started.wait(), 5)
+        (agents_root / "alpha" / "workspace" / "out.txt").write_text("result")
+        p.runner.release.set()
+        assert await p.wait_status(run.id, DONE) is RunStatus.SUCCEEDED
+    head = (await p.infra.history.log("alpha", limit=1))[0]
+    assert head.message == "Run: wait and write"
+    assert head.actor is ActorKind.AGENT and head.run_id == run.id
+    changes = await p.infra.history.diff("alpha", "", "")
+    assert [c.path for c in changes] == ["workspace/out.txt"]
+
+
+async def test_edits_wait_for_the_running_turn(platform: Platform) -> None:
+    p = platform
+    await add_default_credentials(p.credentials)
+    await p.conversations.start_run("alpha", "wait for me")
+    async with running(p.worker):
+        await asyncio.wait_for(p.runner.started.wait(), 5)
+        with pytest.raises(FailedPreconditionError, match="is running"):
+            async with edit_lock(p.infra.queue, "alpha", wait=0.3):
+                pass
+        waiter = asyncio.create_task(_edit_after_run(p))
+        await asyncio.sleep(0.3)
+        assert not waiter.done()
+        p.runner.release.set()
+        assert await asyncio.wait_for(waiter, 5) == RunStatus.SUCCEEDED
+        # While an edit holds the agent, its next turn waits.
+        async with edit_lock(p.infra.queue, "alpha", wait=1):
+            _, second = await p.conversations.start_run("alpha", "next")
+            await asyncio.sleep(0.3)
+            assert (await p.conversations.get_run(second.id)).status is RunStatus.QUEUED
+        assert await p.wait_status(second.id, DONE) is RunStatus.SUCCEEDED
+
+
+async def _edit_after_run(p: Platform) -> RunStatus:
+    async with edit_lock(p.infra.queue, "alpha", wait=5):
+        runs = await p.conversations.list_runs(agent_slug="alpha")
+        return runs[0].status

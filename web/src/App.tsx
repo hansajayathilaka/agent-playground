@@ -65,6 +65,9 @@ export function App() {
         <AgentList
           selected={slug}
           onSelect={select}
+          onOpenConversation={(agentSlug, conversationId) =>
+            go({ page: "agent", slug: agentSlug, view: "chat", conversationId })
+          }
           version={listVersion}
           onChanged={() => setListVersion((v) => v + 1)}
         />

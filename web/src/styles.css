@@ -518,3 +518,122 @@ ul {
     min-height: 60vh;
   }
 }
+
+/* History tab (Phase 4) */
+.history {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.commits {
+  width: 280px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  overflow: auto;
+  padding: 0.25rem;
+}
+.commit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+}
+.commit.active {
+  background: var(--hover);
+}
+.commit-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.diffs {
+  flex: 1;
+  overflow: auto;
+  padding: 0.5rem 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.file-diff {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.file-diff > header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.change {
+  font:
+    600 12px / 1 ui-monospace,
+    monospace;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  background: var(--hover);
+}
+.change-A {
+  color: var(--ok);
+}
+.change-D {
+  color: var(--bad);
+}
+.change-R,
+.change-M {
+  color: var(--warn);
+}
+.patch {
+  margin: 0;
+  overflow-x: auto;
+  font:
+    12px / 1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.dl {
+  display: flex;
+  white-space: pre;
+}
+.dl .ln {
+  flex: 0 0 3.2em;
+  text-align: right;
+  padding-right: 0.5em;
+  color: var(--muted);
+  user-select: none;
+}
+.dl .dt {
+  padding-left: 0.25em;
+}
+.dl-add {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.dl-del {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+}
+.dl-hunk,
+.dl-meta {
+  color: var(--muted);
+  background: var(--hover);
+  padding-left: 0.5em;
+}
+@media (max-width: 800px) {
+  .history {
+    flex-direction: column;
+  }
+  .commits {
+    width: auto;
+    max-height: 30vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}

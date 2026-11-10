@@ -13,7 +13,7 @@ from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 
 from playground_adapters.auth import StaticAdminAuthProvider
-from playground_adapters.wiring import Infra, build_infra
+from playground_adapters.wiring import Infra, build_infra, load_seed_folder
 from playground_api.config import Settings
 from playground_api.guard import GuardInterceptor
 from playground_api.servicers import (
@@ -30,6 +30,7 @@ from playground_core.services.auth import AuthService
 from playground_core.services.conversations import ConversationService
 from playground_core.services.credentials import CredentialService
 from playground_core.services.files import FileService
+from playground_core.services.history import HistoryService
 from playground_proto.platform.v1 import (
     agent_pb2,
     agent_pb2_grpc,
@@ -53,6 +54,7 @@ class Container:
     infra: Infra
     agents: AgentService
     files: FileService
+    history: HistoryService
     auth: AuthService
     credentials: CredentialService
     conversations: ConversationService
@@ -60,7 +62,7 @@ class Container:
 
 
 def build_services(infra: Infra, settings: Settings) -> Container:
-    agents = AgentService(infra.store, infra.agents, infra.templates, infra.clock)
+    agents = AgentService(infra.store, infra.agents, infra.templates, infra.clock, infra.history)
     provider = StaticAdminAuthProvider(
         settings.admin_username, settings.admin_password.get_secret_value()
     )
@@ -82,7 +84,8 @@ def build_services(infra: Infra, settings: Settings) -> Container:
     return Container(
         infra,
         agents,
-        FileService(infra.store, agents),
+        FileService(infra.store, agents, infra.history),
+        HistoryService(infra.history, agents, infra.queue),
         auth,
         credentials,
         conversations,
@@ -93,6 +96,15 @@ def build_services(infra: Infra, settings: Settings) -> Container:
 async def build_container(settings: Settings, stack: AsyncExitStack) -> Container:
     container = build_services(await build_infra(settings, stack), settings)
     await container.agents.reconcile()
+    seed = load_seed_folder(settings.builder_seed_dir)
+    if seed:
+        if await container.agents.seed_system_agent(settings.builder_slug, seed):
+            log.info("seeded the Builder agent %s", settings.builder_slug)
+    else:
+        log.warning(
+            "no Builder seed at %s; the Builder is not available", settings.builder_seed_dir
+        )
+    await container.agents.snapshot_all()
     return container
 
 
@@ -108,7 +120,9 @@ async def build_server(container: Container) -> aio.Server:
     )
     auth_pb2_grpc.add_AuthServiceServicer_to_server(AuthServicer(container.auth), server)
     agent_pb2_grpc.add_AgentServiceServicer_to_server(AgentServicer(container.agents), server)
-    file_pb2_grpc.add_FileServiceServicer_to_server(FileServicer(container.files), server)
+    file_pb2_grpc.add_FileServiceServicer_to_server(
+        FileServicer(container.files, container.history), server
+    )
     run_pb2_grpc.add_RunServiceServicer_to_server(RunServicer(container.conversations), server)
     run_pb2_grpc.add_ConversationServiceServicer_to_server(
         ConversationServicer(container.conversations), server

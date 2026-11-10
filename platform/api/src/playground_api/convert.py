@@ -9,11 +9,15 @@ from google.protobuf.timestamp_pb2 import Timestamp
 
 from playground_core.events import Event
 from playground_core.models import (
+    ActorKind,
     AgentRecord,
     AuthType,
+    ChangeKind,
+    Commit,
     Conversation,
     CredentialSet,
     Diagnostic,
+    FileChange,
     FileEntry,
     FileKind,
     Provider,
@@ -192,4 +196,42 @@ def credential_input(i: credential_pb2.CredentialSetInput) -> CredentialInput:
         headers=dict(i.headers),
         default_model=i.default_model.strip(),
         allowed_models=[m.strip() for m in i.allowed_models if m.strip()],
+    )
+
+
+_ACTOR = {
+    ActorKind.USER: file_pb2.Commit.ACTOR_USER,
+    ActorKind.BUILDER: file_pb2.Commit.ACTOR_BUILDER,
+    ActorKind.AGENT: file_pb2.Commit.ACTOR_AGENT,
+    ActorKind.PLATFORM: file_pb2.Commit.ACTOR_PLATFORM,
+}
+_CHANGE = {
+    ChangeKind.ADDED: file_pb2.FileChange.CHANGE_ADDED,
+    ChangeKind.MODIFIED: file_pb2.FileChange.CHANGE_MODIFIED,
+    ChangeKind.DELETED: file_pb2.FileChange.CHANGE_DELETED,
+    ChangeKind.RENAMED: file_pb2.FileChange.CHANGE_RENAMED,
+}
+
+
+def commit(c: Commit) -> file_pb2.Commit:
+    return file_pb2.Commit(
+        id=c.id,
+        message=c.message,
+        author=c.author,
+        actor=_ACTOR[c.actor],
+        time=ts(c.time),
+        run_id=c.run_id,
+    )
+
+
+def file_change(c: FileChange) -> file_pb2.FileChange:
+    return file_pb2.FileChange(
+        path=c.path,
+        change=_CHANGE[c.change],
+        old_path=c.old_path,
+        binary=c.binary,
+        additions=c.additions,
+        deletions=c.deletions,
+        patch=c.patch,
+        truncated=c.truncated,
     )

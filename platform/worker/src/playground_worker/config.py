@@ -61,7 +61,6 @@ class WorkerSettings(InfraSettings):
     run_cpus: float = Field(default=2.0, gt=0)
     run_max_processes: int = Field(default=512, ge=16)
     run_max_file_mb: int = Field(default=4096, ge=1)
-    builder_slug: str = "_builder"
 
     def sandbox(self) -> SandboxSettings:
         return SandboxSettings(

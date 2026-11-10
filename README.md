@@ -2,7 +2,7 @@
 
 A platform for creating and running many Claude Agent SDK agents. Each agent lives in its own folder (CLAUDE.md, rules, memory, settings, MCP config, hooks, skills, subagents), runs in a background worker sandboxed to that folder, and streams its output to any client. A Builder agent creates and edits the other agents.
 
-Status: Phases 1-3 implemented: create and edit agent folders, add model credentials, and chat with agents in the browser (background runs, live streaming, multi-turn sessions, cancel). Every run is jailed with bubblewrap to its own folder, with filtered network egress and per-run resource limits. The Builder (Phase 4) comes next. The worker container runs privileged; on Ubuntu 24.04+ hosts set `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (see docs/architecture.md, "Phase 3 as built").
+Status: Phases 1-4 implemented: create and edit agent folders, add model credentials, and chat with agents in the browser (background runs, live streaming, multi-turn sessions, cancel). Every run is jailed with bubblewrap to its own folder, with filtered network egress and per-run resource limits. The Builder agent creates and changes agents from a plain description (New → Describe it), and every agent folder has a history with diff, undo and restore. Tools and providers (Phase 5) come next. The worker container runs privileged; on Ubuntu 24.04+ hosts set `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (see docs/architecture.md, "Phase 3 as built").
 
 ## Quick start
 
@@ -11,7 +11,7 @@ cp deploy/.env.example deploy/.env      # set ADMIN_PASSWORD and SECRETS_KEY
 docker compose -f deploy/compose.yaml up -d --build
 ```
 
-Open http://localhost:8080, sign in as `admin`, add a credential set under Credentials, then open an agent's Chat tab. Native gRPC clients use the same port (`grpcurl -plaintext localhost:8080 list`).
+Open http://localhost:8080, sign in as `admin`, add a credential set under Credentials, then click New → Describe it to have the Builder make an agent, or open any agent's Chat tab. Native gRPC clients use the same port (`grpcurl -plaintext localhost:8080 list`).
 
 ## Development
 

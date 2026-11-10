@@ -2,7 +2,12 @@
 CLI to complete a turn. Every reply is "pong: <last user text>". Trigger
 words in the user text first ask for one tool call (see TOOL_TRIGGERS),
 "run-bash: <command>" asks for one Bash call running <command>, and "slow"
-streams the reply very slowly so a cancel lands mid-stream."""
+streams the reply very slowly so a cancel lands mid-stream.
+
+A first user message starting with "script: " followed by a JSON list of
+``[tool_name, input]`` pairs plays those tool calls in order, one per model
+turn (the step is the number of tool results so far), then replies
+"script done"."""
 
 from __future__ import annotations
 
@@ -38,6 +43,43 @@ TOOL_TRIGGERS: dict[str, tuple[str, dict[str, Any]]] = {
     "use-bash": ("Bash", {"command": "env > workspace/env.txt", "description": "dump env"}),
 }
 BASH_PREFIX = "run-bash: "
+
+
+SCRIPT_PREFIX = "script: "
+
+
+def _first_user_text(body: dict[str, Any]) -> str:
+    for msg in body.get("messages", []):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        for c in content:
+            text = c.get("text", "") if c.get("type") == "text" else ""
+            if text and not text.startswith("<system-reminder>"):
+                return text
+    return ""
+
+
+def _script_step(body: dict[str, Any]) -> tuple[str, dict[str, Any]] | str | None:
+    """The next scripted tool call, "done" when the script is over, or None
+    when this conversation is not scripted."""
+    first = _first_user_text(body)
+    if not first.startswith(SCRIPT_PREFIX):
+        return None
+    steps: list[list[Any]] = json.loads(first[len(SCRIPT_PREFIX) :])
+    done = sum(
+        1
+        for msg in body.get("messages", [])
+        if msg.get("role") == "user" and isinstance(msg.get("content"), list)
+        for c in msg["content"]
+        if c.get("type") == "tool_result"
+    )
+    if done >= len(steps):
+        return "done"
+    name, tool_input = steps[done]
+    return str(name), dict(tool_input)
 
 
 def _tool_request(text: str) -> tuple[str, dict[str, Any]] | None:
@@ -109,6 +151,11 @@ class FakeModelAPI:
         text = _last_user_text(body)
         n = len(self.requests)
         tool = _tool_request(text)
+        scripted = _script_step(body) if body.get("tools") else None
+        if scripted == "done":
+            tool, text = None, "script"
+        elif isinstance(scripted, tuple):
+            tool = scripted
         blocks: list[dict[str, Any]]
         if tool and body.get("tools"):
             name, tool_input = tool
@@ -116,6 +163,8 @@ class FakeModelAPI:
             stop = "tool_use"
         else:
             reply = "done" if text == "<tool_result>" else f"pong: {text}"
+            if scripted == "done":
+                reply = "script done"
             blocks = [{"type": "text", "text": reply}]
             stop = "end_turn"
         message: dict[str, Any] = {

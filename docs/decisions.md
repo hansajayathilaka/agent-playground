@@ -1,6 +1,6 @@
 # Decision log
 
-Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20 were implementation choices made in Phase 1, 21-27 in Phase 2 and 28-34 in Phase 3; they are open for review. Details: [architecture.md](architecture.md).
+Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20 were implementation choices made in Phase 1, 21-27 in Phase 2, 28-34 in Phase 3 and 35-41 in Phase 4; they are open for review. Details: [architecture.md](architecture.md).
 
 | # | Topic | Decision | Notes |
 | --- | --- | --- | --- |
@@ -38,3 +38,10 @@ Decisions 1-15 were made by Hansa on 2026-11-07 during planning. Decisions 16-20
 | 32 | Builder's jail view | The `_builder` agent can read every agent folder (except `state/`, `.git/` and deleted agents) but writes only its own `memory/` and `workspace/` | Cross-agent writes go through the platform MCP tools in Phase 4, which run in the worker and use `resolve_agent_path()` |
 | 33 | Writable dirs | `memory/` and `workspace/` must be real directories; a symlinked one fails the run before the CLI starts | A bind mount follows symlinks on the host side, so a symlink would expose its target writable |
 | 34 | Sandbox off switch | `SANDBOX_MODE=none` runs the CLI unjailed, for development only; the worker logs a warning. The worker refuses to start if `bwrap` can't build a jail and the mode is `bwrap` | CI fails instead of skipping the escape suite (`REQUIRE_SANDBOX=1`) |
+| 35 | Agent history | `AgentHistory` port; v1 adapter is a git repo per agent in its own `.git/` (git CLI, hardened config). `state/` is excluded | Matches the plan's per-agent `.git`; the port keeps a non-git store possible. Git ships in the API image now too |
+| 36 | Commit granularity | Every platform change is one commit: each API save/delete/move, each Builder tool write, and one snapshot at the end of every run. Recording never fails the change itself | Gives undo per save without a separate "save version" step. The history of a busy agent gets long; squashing is a later concern |
+| 37 | Rollback | Restores into a new commit (history is never rewritten), whole folder or one path, under the agent's edit lock | Undoable rollbacks; no surprises for runs in flight |
+| 38 | Edit lock | `JobQueue.lock`/`unlock` take the same per-agent lock a run's lease uses. Builder writes and rollbacks hold it; plain API edits from the editor don't | Implements "the Builder takes the target agent's lock while writing" without a second lock service. Editor saves stay instant, as in Phase 1 |
+| 39 | Builder tools | In-process SDK MCP server named `platform`, added only to runs of `BUILDER_SLUG`, backed by a core `BuilderToolkit`. Tool list in architecture.md; adds `get_agent`, `list_templates`, `list_credential_sets`, `agent_history`, `rollback_agent`, `get_test_run` to the planned set | Tools run in the worker, outside the jail, so cross-agent writes go through `resolve_agent_path()` (decision 32) |
+| 40 | Builder seeding | `agents/_builder/` is copied to the agents volume by the API at startup only when the folder is missing; system agents (`_` slugs) can't be deleted through the API | Local changes to the Builder survive upgrades. Re-seed by removing the folder on disk |
+| 41 | New validators are warnings | Skill/subagent frontmatter, command frontmatter, `CLAUDE.md` imports and a missing `CLAUDE.md` are warnings, not errors | The SDK still runs with them (it just ignores a bad skill), so they shouldn't block runs; the Builder and the UI still see them |

@@ -14,6 +14,7 @@ import {
 } from "../lib/tree.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { FileTree } from "./FileTree.js";
+import { HistoryPanel } from "./HistoryPanel.js";
 
 interface OpenFile {
   path: string;
@@ -23,7 +24,7 @@ interface OpenFile {
   size: number;
 }
 
-export type WorkspaceView = "files" | "chat";
+export type WorkspaceView = "files" | "chat" | "history";
 
 interface Props {
   slug: string;
@@ -219,6 +220,8 @@ export function AgentWorkspace({
   };
 
   const errors = diagnostics.filter((d) => d.severity === Diagnostic_Severity.ERROR).length;
+  const system = slug.startsWith("_");
+  const selectCommit = useCallback((id: string) => onNavigate("history", id), [onNavigate]);
 
   return (
     <section className="workspace">
@@ -246,16 +249,43 @@ export function AgentWorkspace({
           >
             Files
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "history"}
+            className={view === "history" ? "tab active" : "tab"}
+            onClick={() => onNavigate("history", null)}
+          >
+            History
+          </button>
         </div>
         <span className="spacer" />
         <span className={errors ? "badge bad" : "badge ok"}>
           {errors ? `${errors} error(s): runs blocked` : "valid"}
         </span>
-        <button type="button" className="danger" onClick={deleteAgent}>
-          Delete agent
-        </button>
+        {system ? (
+          <span className="badge" title="System agents can't be deleted">
+            system agent
+          </span>
+        ) : (
+          <button type="button" className="danger" onClick={deleteAgent}>
+            Delete agent
+          </button>
+        )}
       </div>
-      {view === "chat" ? (
+      {view === "history" ? (
+        <HistoryPanel
+          slug={slug}
+          commitId={conversationId}
+          onSelect={selectCommit}
+          onRestored={() => {
+            setFile(null);
+            refreshTree().catch(fail);
+            refreshAgent().catch(fail);
+            onManifestSaved();
+          }}
+        />
+      ) : view === "chat" ? (
         <ChatPanel
           slug={slug}
           conversationId={conversationId}

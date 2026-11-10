@@ -46,6 +46,18 @@ class FileServiceStub:
     DeleteFile: _grpc.UnaryUnaryMultiCallable[_file_pb2.DeleteFileRequest, _file_pb2.DeleteFileResponse]
     MoveFile: _grpc.UnaryUnaryMultiCallable[_file_pb2.MoveFileRequest, _file_pb2.MoveFileResponse]
     CreateDirectory: _grpc.UnaryUnaryMultiCallable[_file_pb2.CreateDirectoryRequest, _file_pb2.CreateDirectoryResponse]
+    ListHistory: _grpc.UnaryUnaryMultiCallable[_file_pb2.ListHistoryRequest, _file_pb2.ListHistoryResponse]
+    """Version history of the agent folder (state/ is never part of it). Every
+    change made through the platform is a commit: file edits, the Builder's
+    writes and what each run changed in memory/ and workspace/.
+    """
+    DiffAgent: _grpc.UnaryUnaryMultiCallable[_file_pb2.DiffAgentRequest, _file_pb2.DiffAgentResponse]
+    """Changes between two commits; see DiffAgentRequest for the defaults."""
+    RollbackAgent: _grpc.UnaryUnaryMultiCallable[_file_pb2.RollbackAgentRequest, _file_pb2.RollbackAgentResponse]
+    """Restores the folder, or one path, to an earlier commit and records that
+    as a new commit, so a rollback can itself be undone. Fails with
+    FAILED_PRECONDITION while the agent is running.
+    """
 
 @_typing.type_check_only
 class FileServiceAsyncStub(FileServiceStub):
@@ -65,6 +77,18 @@ class FileServiceAsyncStub(FileServiceStub):
     DeleteFile: _aio.UnaryUnaryMultiCallable[_file_pb2.DeleteFileRequest, _file_pb2.DeleteFileResponse]  # type: ignore[assignment]
     MoveFile: _aio.UnaryUnaryMultiCallable[_file_pb2.MoveFileRequest, _file_pb2.MoveFileResponse]  # type: ignore[assignment]
     CreateDirectory: _aio.UnaryUnaryMultiCallable[_file_pb2.CreateDirectoryRequest, _file_pb2.CreateDirectoryResponse]  # type: ignore[assignment]
+    ListHistory: _aio.UnaryUnaryMultiCallable[_file_pb2.ListHistoryRequest, _file_pb2.ListHistoryResponse]  # type: ignore[assignment]
+    """Version history of the agent folder (state/ is never part of it). Every
+    change made through the platform is a commit: file edits, the Builder's
+    writes and what each run changed in memory/ and workspace/.
+    """
+    DiffAgent: _aio.UnaryUnaryMultiCallable[_file_pb2.DiffAgentRequest, _file_pb2.DiffAgentResponse]  # type: ignore[assignment]
+    """Changes between two commits; see DiffAgentRequest for the defaults."""
+    RollbackAgent: _aio.UnaryUnaryMultiCallable[_file_pb2.RollbackAgentRequest, _file_pb2.RollbackAgentResponse]  # type: ignore[assignment]
+    """Restores the folder, or one path, to an earlier commit and records that
+    as a new commit, so a rollback can itself be undone. Fails with
+    FAILED_PRECONDITION while the agent is running.
+    """
 
 class FileServiceServicer(metaclass=_abc_1.ABCMeta):
     """File CRUD inside one agent folder. Every path is relative to the agent root
@@ -117,5 +141,35 @@ class FileServiceServicer(metaclass=_abc_1.ABCMeta):
         request: _file_pb2.CreateDirectoryRequest,
         context: _ServicerContext,
     ) -> _typing.Union[_file_pb2.CreateDirectoryResponse, _abc.Awaitable[_file_pb2.CreateDirectoryResponse]]: ...
+
+    @_abc_1.abstractmethod
+    def ListHistory(
+        self,
+        request: _file_pb2.ListHistoryRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_file_pb2.ListHistoryResponse, _abc.Awaitable[_file_pb2.ListHistoryResponse]]:
+        """Version history of the agent folder (state/ is never part of it). Every
+        change made through the platform is a commit: file edits, the Builder's
+        writes and what each run changed in memory/ and workspace/.
+        """
+
+    @_abc_1.abstractmethod
+    def DiffAgent(
+        self,
+        request: _file_pb2.DiffAgentRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_file_pb2.DiffAgentResponse, _abc.Awaitable[_file_pb2.DiffAgentResponse]]:
+        """Changes between two commits; see DiffAgentRequest for the defaults."""
+
+    @_abc_1.abstractmethod
+    def RollbackAgent(
+        self,
+        request: _file_pb2.RollbackAgentRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_file_pb2.RollbackAgentResponse, _abc.Awaitable[_file_pb2.RollbackAgentResponse]]:
+        """Restores the folder, or one path, to an earlier commit and records that
+        as a new commit, so a rollback can itself be undone. Fails with
+        FAILED_PRECONDITION while the agent is running.
+        """
 
 def add_FileServiceServicer_to_server(servicer: FileServiceServicer, server: _typing.Union[_grpc.Server, _aio.Server]) -> None: ...

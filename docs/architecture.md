@@ -1,6 +1,6 @@
 # Agent Playground: architecture
 
-Status: final plan, 2026-11-07. Phases 1 (Foundations), 2 (Runs) and 3 (Isolation) implemented; see the "as built" sections below.
+Status: final plan, 2026-11-07. Phases 1 (Foundations), 2 (Runs), 3 (Isolation) and 4 (Builder) implemented; see the "as built" sections below.
 Living copy with comments: https://claude.ai/artifact/8DNvqYQD6jHoP95k6qPCPv
 Decision log: [decisions.md](decisions.md)
 
@@ -65,6 +65,7 @@ Every external dependency sits behind a port (interface) in the core package. Sw
 | `AuthProvider` | Identify the caller | Single admin login | OIDC, multi-user |
 | `AgentRunner` | Execute one agent turn | Claude Agent SDK | Other agent runtimes, a fake for tests |
 | `ToolRegistry` | Catalog of tool kinds and packs | Built-in registry | New tool kinds |
+| `AgentHistory` | Version history of each agent folder: commit, log, diff, restore | git repository in the folder's `.git/` (git CLI) | Object store snapshots, a database of revisions |
 
 Rules:
 
@@ -144,7 +145,7 @@ Draft service outline:
 | Service | Methods |
 | --- | --- |
 | `AgentService` | `ListAgents`, `GetAgent`, `CreateAgent` (from template), `DeleteAgent`, `ValidateAgent`, `ListTemplates` |
-| `FileService` | `GetTree`, `ReadFile` (stream), `WriteFile` (unary, etag), `DeleteFile`, `MoveFile`, `CreateDirectory`, `DiffAgent`, `RollbackAgent` |
+| `FileService` | `GetTree`, `ReadFile` (stream), `WriteFile` (unary, etag), `DeleteFile`, `MoveFile`, `CreateDirectory`, `ListHistory`, `DiffAgent`, `RollbackAgent` |
 | `RunService` | `StartRun`, `GetRun`, `ListRuns`, `CancelRun`, `AnswerApproval` |
 | `ConversationService` | `CreateConversation`, `SendMessage`, `ListConversations`, `GetConversation`, `SetApprovals` |
 | `EventService` | `WatchEvents` (server stream) |
@@ -333,6 +334,46 @@ Limits: per run, `agent.json` `limits.*` or the worker's `RUN_TIMEOUT_SECONDS` (
 Settings: `SANDBOX_MODE` (`bwrap` | `none`, development only), `SANDBOX_NETWORK` (`proxy` | `host`; `host` shares the worker's network and can reach Redis/Postgres), `RUN_CGROUP_ROOT` (set by the entrypoint), `RUN_RUNTIME_DIR`, `BUILDER_SLUG`.
 
 Still open after Phase 3: the agent can read its own `tools/`, `.claude/` and `.mcp.json` (by design) and anything world-readable under `/usr`; the worker container itself is privileged, so a kernel escape from a jail is a container escape (a VM or gVisor runtime is the next step if agents become untrusted multi-tenant code); per-run disk usage is bounded only by the file-size rlimit, not a quota.
+
+## Phase 4 as built
+
+| Area | Where | Notes |
+| --- | --- | --- |
+| History port | `playground_core/ports.py` (`AgentHistory`), `playground_adapters/git_history.py` | One git repo per agent in `<agent>/.git`; contract suite `tests/contracts/test_agent_history.py` |
+| History service | `playground_core/services/history.py` | `record_change` (never fails the edit it records), `edit_lock`, `HistoryService` (log, diff, rollback) |
+| Edit lock | `JobQueue.lock` / `unlock` (memory + Redis) | Same key as a run's lease, so an edit and a run of one agent never overlap; unlock re-wakes queued jobs |
+| Builder tools | `playground_core/services/builder.py` (`BuilderToolkit`), `playground_worker/builder_mcp.py` | 15 tools as an in-process SDK MCP server named `platform`, added only to `_builder` runs (`BuilderTools` in `playground_worker/main.py`) |
+| Builder agent | `agents/_builder/` | CLAUDE.md, conventions rule, skills `create-agent`, `add-mcp-server`, `write-skill`, `tune-permissions`. Seeded by the API at startup when its folder is missing (`BUILDER_SEED_DIR`) |
+| Validators | `playground_core/validation.py` | Whole-folder validation: skills and subagents need frontmatter `name`/`description`, commands need well-formed frontmatter, `CLAUDE.md` `@imports` must exist inside the folder, missing `CLAUDE.md`. All new checks are warnings (they don't block runs) |
+| Protobuf API | `proto/platform/v1/file.proto` | `ListHistory`, `DiffAgent`, `RollbackAgent`, `Commit`, `FileChange` (additive; `buf breaking` clean) |
+| Web UI | `web/src/components/HistoryPanel.tsx`, `NewAgentForm.tsx`, `web/src/lib/diff.ts` | History tab (change list, per-file diffs, "Undo this change", "Undo in this file", "Restore this version"); "Describe it" in the new-agent form starts a Builder chat; system agents show a badge instead of Delete |
+| Tests | `test_builder.py`, `test_builder_toolkit.py`, `test_runs.py`, `test_api.py`, `test_validation.py` | The end-to-end test runs the real CLI in the jail against a scripted fake model: the Builder creates an agent, writes its files, validates it and test-runs it |
+
+What gets recorded, and by whom (commit author and `Platform-Actor` / `Platform-Run` trailers):
+
+| Change | Actor | Message |
+| --- | --- | --- |
+| `CreateAgent`, `WriteFile`, `DeleteFile`, `MoveFile`, `RollbackAgent` through the API | `user` (the signed-in name) | `Create agent from template 'x'`, `Update <path>`, `Delete <path>`, `Move a to b`, `Roll back to <id>` |
+| Builder tool writes | `builder`, with the Builder's run id | same messages |
+| End of every run, while the agent lock is still held | `agent`, with the run id | `Run: <prompt>` (skipped when nothing changed) |
+| API startup | `platform` | `Seed system agent`, `Start history` (agents from before Phase 4), `Record changes made outside the platform` |
+
+History rules:
+
+- `state/` is excluded (`.git/info/exclude`); `.git/` stays hidden from the API tree and masked inside the jail, so an agent can't rewrite its own history.
+- Git runs with no global/system config, hooks off, `core.symlinks=false`, no external diff or textconv, and explicit `--git-dir`/`--work-tree`, so files an agent wrote can't make git execute anything or follow a link out of the folder. Commit ids from clients must be hex; paths are passed as literal pathspecs.
+- A rollback never rewrites history: it records pending changes, restores the folder (or one path) from the target commit, and commits that as a new change. It takes the edit lock, so it waits up to 10 s for a running turn and then fails with `FAILED_PRECONDITION`.
+- The API and the worker may commit to the same repo at once; git's index lock serialises them and a busy lock is retried.
+- `memory/` and `workspace/` are part of the history, so a rollback restores the agent's notes too. Very large or binary workspace outputs grow the repo; there is no size cap yet (Phase 6).
+
+Builder tools (`mcp__platform__*`): `list_agents`, `list_templates`, `list_credential_sets` (names, never secrets), `get_agent`, `read_agent_file`, `create_agent`, `write_agent_file`, `delete_agent_file`, `validate_agent`, `assign_credential_set`, `agent_history`, `diff_agent`, `rollback_agent`, `test_run_agent`, `get_test_run`. They run in the worker process, outside the Builder's jail, through the same `AgentService`/`FileService` the API uses (so `resolve_agent_path()`, platform-path rules and validation all apply). Guardrails:
+
+- The Builder may read any agent but every write to `_builder` is refused; it keeps its own notes in its `memory/` with the normal Write tool.
+- Each write takes the target agent's edit lock (waits up to 30 s for a running turn) and is a commit tagged with the Builder's run id.
+- `test_run_agent` queues a normal turn on the target agent (its own credentials, sandbox and limits) in a conversation titled `Builder test: …`, waits up to `timeout_seconds` (default 180, max 900) and returns status, reply, tool calls and errors. With a single worker slot the test run can't start while the Builder holds that slot; the tool then returns `queued` and `get_test_run` checks later.
+- Not yet: the optional approval before the Builder edits permissions or hooks arrives with the approvals switch in Phase 5.
+
+The `_builder` folder is seeded only when missing, so local edits to it survive upgrades; delete the folder on disk (it's a system agent and can't be deleted through the API) to re-seed it from a newer image.
 
 ## Phased delivery
 

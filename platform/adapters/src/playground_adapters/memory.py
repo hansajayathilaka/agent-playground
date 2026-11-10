@@ -354,3 +354,19 @@ class InMemoryJobQueue:
             if n:
                 self._changed.notify_all()
             return n
+
+    async def lock(self, agent_slug: str, ttl: timedelta) -> str | None:
+        async with self._changed:
+            if self._locked(agent_slug):
+                return None
+            token = secrets.token_hex(8)
+            self._locks[agent_slug] = (token, time.monotonic() + ttl.total_seconds())
+            return token
+
+    async def unlock(self, agent_slug: str, token: str) -> None:
+        async with self._changed:
+            lock = self._locks.get(agent_slug)
+            if lock is None or lock[0] != token:
+                return
+            del self._locks[agent_slug]
+            self._changed.notify_all()

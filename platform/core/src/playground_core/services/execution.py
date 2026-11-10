@@ -18,8 +18,9 @@ from typing import Any
 from playground_core.errors import DomainError, FailedPreconditionError, NotFoundError
 from playground_core.events import Event, EventKind
 from playground_core.manifest import MANIFEST_FILE, AgentManifest
-from playground_core.models import ControlKind, Lease, Run, RunLimits, RunStatus
+from playground_core.models import Actor, ControlKind, Lease, Run, RunLimits, RunStatus
 from playground_core.ports import (
+    AgentHistory,
     AgentRunner,
     AgentStore,
     Clock,
@@ -36,6 +37,7 @@ from playground_core.providers import provider_env, resolve_model
 from playground_core.services.agents import AgentService
 from playground_core.services.conversations import status_event
 from playground_core.services.credentials import CredentialService
+from playground_core.services.history import record_change
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +64,7 @@ class RunExecutor:
         clock: Clock,
         worker_id: str,
         timing: LeaseTiming | None = None,
+        history: AgentHistory | None = None,
     ) -> None:
         self._runs = runs
         self._conversations = conversations
@@ -75,6 +78,7 @@ class RunExecutor:
         self._clock = clock
         self._worker_id = worker_id
         self._timing = timing or LeaseTiming()
+        self._history = history
 
     async def execute(self, lease: Lease) -> None:
         """Run the leased job and always complete the lease."""
@@ -152,6 +156,12 @@ class RunExecutor:
             with contextlib.suppress(asyncio.CancelledError):
                 await beat
 
+        # Snapshot what the turn changed (memory/, workspace/) while the agent
+        # lock is still held, tagged with the run id.
+        summary = " ".join(run.prompt.split())[:72]
+        await record_change(
+            self._history, run.agent_slug, f"Run: {summary}", Actor.agent(run.agent_slug, run.id)
+        )
         if outcome.session_id:
             await self._save_session(run.conversation_id, outcome.session_id)
         status, error = outcome.status, outcome.error
